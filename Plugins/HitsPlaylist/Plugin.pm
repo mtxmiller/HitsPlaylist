@@ -59,6 +59,9 @@ sub initPlugin {
         ['hitsplaylist', 'play'], [1, 0, 1, \&_cliPlay]
     );
     Slim::Control::Request::addDispatch(
+        ['hitsplaylist', 'add'], [1, 0, 1, \&_cliPlay]
+    );
+    Slim::Control::Request::addDispatch(
         ['hitsplaylist', 'playsave'], [1, 0, 1, \&_cliPlay]
     );
 
@@ -285,22 +288,32 @@ sub _buildFeed {
         # so anything set there is silently discarded. This row is the only place
         # the strict-mode outcome can actually be surfaced, and it matters: a
         # 12-track result should read as "you own 12 of these", not as a bug.
-        # Play all comes first: saving is the occasional case, not the default.
-        # Every run saving a playlist would silt up the playlist menu fast.
+        # Order follows the LMS convention users already know from every other
+        # context menu: play, then add to end, then the less common action.
+        # Saving is deliberately last; doing it on every run silts up the
+        # playlist menu fast.
         unshift @items,
             {
                 name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_ALL')
                              . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
                 type        => 'link',
                 url         => \&playHits,
-                passthrough => [ { artist => $seed, save => 0 } ],
+                passthrough => [ { artist => $seed, cmd => 'playtracks', save => 0 } ],
                 nextWindow  => 'nowPlaying',
+            },
+            {
+                name        => cstring($client, 'PLUGIN_HITSPLAYLIST_ADD_QUEUE'),
+                type        => 'link',
+                url         => \&playHits,
+                passthrough => [ { artist => $seed, cmd => 'addtracks', save => 0 } ],
+                # Deliberately NOT nowPlaying: appending should leave you where
+                # you are so you can keep browsing and add more.
             },
             {
                 name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
                 type        => 'link',
                 url         => \&playHits,
-                passthrough => [ { artist => $seed, save => 1 } ],
+                passthrough => [ { artist => $seed, cmd => 'playtracks', save => 1 } ],
                 nextWindow  => 'nowPlaying',
             };
     }
@@ -308,8 +321,9 @@ sub _buildFeed {
     $cb->({ items => \@items });
 }
 
-# One handler for both rows. $pt->{save} decides whether the queue is also
-# written out as a named playlist.
+# One handler for all three rows.
+#   $pt->{cmd}  playtracks (replace the queue and play) or addtracks (append)
+#   $pt->{save} also write the result out as a named playlist
 sub playHits {
     my ( $client, $cb, $args, $pt ) = @_;
 
@@ -322,15 +336,18 @@ sub playHits {
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] })
         unless @$urls;
 
-    $client->execute([ 'playlist', 'playtracks', 'listRef', $urls ]);
+    my $cmd = $pt->{cmd} || 'playtracks';
+    $client->execute([ 'playlist', $cmd, 'listRef', $urls ]);
 
     if ( !$pt->{save} ) {
+        my $msg = $cmd eq 'addtracks'
+                ? cstring($client, 'PLUGIN_HITSPLAYLIST_ADDED')
+                : cstring($client, 'PLUGIN_HITSPLAYLIST_PLAYING');
+
         return $cb->({
-            items => [ {
-                type => 'text',
-                name => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAYING'),
-            } ],
-            nextWindow => 'nowPlaying',
+            items      => [ { type => 'text', name => sprintf('%s (%d)', $msg, scalar @$urls) } ],
+            # Appending should not yank the user to Now Playing.
+            $cmd eq 'addtracks' ? () : ( nextWindow => 'nowPlaying' ),
         });
     }
 
@@ -355,7 +372,7 @@ sub _cliPlay {
         $request->setStatusNeedsClient();
         return;
     }
-    if ( $request->isNotCommand([['hitsplaylist'], ['play', 'playsave']]) ) {
+    if ( $request->isNotCommand([['hitsplaylist'], ['play', 'add', 'playsave']]) ) {
         $request->setStatusBadDispatch();
         return;
     }
@@ -369,11 +386,14 @@ sub _cliPlay {
         return;
     }
 
-    $client->execute([ 'playlist', 'playtracks', 'listRef', $urls ]);
+    my $verb = $request->getRequest(1);
+    $client->execute([
+        'playlist', ($verb eq 'add' ? 'addtracks' : 'playtracks'), 'listRef', $urls
+    ]);
     $request->addResult('count', scalar @$urls);
 
     # Which verb was dispatched decides whether we also save.
-    if ( $request->getRequest(1) eq 'playsave' ) {
+    if ( $verb eq 'playsave' ) {
         my $name = _playlistName($data->{artist});
         $client->execute([ 'playlist', 'save', $name ]);
         $request->addResult('playlist', $name);
