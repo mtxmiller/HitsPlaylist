@@ -243,9 +243,13 @@ sub _cliPlaySave {
     $request->setStatusDone();
 }
 
+# The name becomes a filename, so it goes through LMS's filename sanitizer.
+# "Hits: Fleetwood Mac" came back as "Hits  Fleetwood Mac" with a double space,
+# because the colon is stripped rather than replaced. A hyphen survives intact
+# and still sorts every generated playlist together in the menu.
 sub _playlistName {
     my ($artist) = @_;
-    return 'Hits: ' . ($artist // 'Unknown');
+    return 'Hits - ' . ($artist // 'Unknown');
 }
 
 sub _errorItem {
