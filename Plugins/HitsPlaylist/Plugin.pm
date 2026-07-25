@@ -35,7 +35,10 @@ use Plugins::HitsPlaylist::Matcher qw(dedupe_hits match_title choose_version is_
 # Ask for more than we need. Strict mode skips anything not owned, so a top-40
 # request routinely yields far fewer, and the deeper ranks are what fill a
 # playlist for an artist whose biggest hits happen to be missing.
-use constant LASTFM_LIMIT   => 50;
+use constant LASTFM_LIMIT   => 30;   # top tracks requested per artist
+use constant SIMILAR_LIMIT  => 30;   # similar artists requested from Last.fm
+use constant MAX_ARTISTS    => 12;   # owned artists to actually build from
+use constant PER_ARTIST_MAX => 6;    # ceiling per artist before interleaving
 use constant MAX_PLAYLIST   => 40;
 
 my $log = Slim::Utils::Log->addLogCategory({
@@ -90,64 +93,173 @@ sub artistInfoMenu {
 sub hitsFeed {
     my ( $client, $cb, $args, $pt ) = @_;
 
-    my $artist = $pt->{artist};
+    my $seed = $pt->{artist};
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] })
-        unless $artist;
+        unless $seed;
 
-    Plugins::HitsPlaylist::LFM->topTracks(
-        sub { _gotTopTracks($client, $cb, $artist, shift) },
+    # Ask Last.fm who sounds like this artist, then throw away the ones we do
+    # not own BEFORE fetching anybody's hits. find_contributor is a local indexed
+    # lookup and costs nothing; artist.gettoptracks is a network round trip. On a
+    # typical library only a handful of 30 similar artists are owned, so this
+    # turns ~30 API calls into ~6.
+    Plugins::HitsPlaylist::LFM->similarArtists(
         sub {
-            my $err = shift;
-            $log->error("Last.fm lookup failed for '$artist': " . ($err // 'unknown'));
-            $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_LOOKUP_FAILED') ] });
+            my $similar = shift || [];
+            _resolveArtists($client, $cb, $seed, [ map { $_->{name} } @$similar ]);
         },
-        $artist,
-        LASTFM_LIMIT,
+        sub {
+            # No similar-artist data is not fatal: fall back to the seed alone,
+            # which is exactly the v0.1 behaviour.
+            my $err = shift;
+            $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
+            _resolveArtists($client, $cb, $seed, []);
+        },
+        $seed,
+        SIMILAR_LIMIT,
     );
 }
 
-sub _gotTopTracks {
-    my ($client, $cb, $artist, $hits) = @_;
+sub _resolveArtists {
+    my ($client, $cb, $seed, $similarNames) = @_;
 
-    if ( !$hits || !@$hits ) {
-        return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_HITS') ] });
+    my @resolved;
+    my %seen;
+
+    # Seed artist always leads, so its hits land first in every round.
+    for my $name ($seed, @$similarNames) {
+        last if @resolved >= MAX_ARTISTS;
+        next if $seen{ lc $name }++;
+
+        my $contributor = Plugins::HitsPlaylist::Library->find_contributor($name);
+        next unless $contributor;
+
+        push @resolved, { name => $name, contributor => $contributor };
     }
 
-    my $contributor = Plugins::HitsPlaylist::Library->find_contributor($artist);
-    if ( !$contributor ) {
+    if ( !@resolved ) {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NOT_IN_LIBRARY') ] });
     }
 
-    my $local = Plugins::HitsPlaylist::Library->tracks_for_contributor($contributor);
+    _fetchHitsSerially($client, $cb, $seed, \@resolved);
+}
 
-    # The API returns the same song under several scrobbled titles. Dedupe before
-    # matching or the playlist quota gets spent on one song three times over.
+# One artist at a time, not a fan-out.
+#
+# Firing a dozen concurrent HTTPS requests at a free API we are not paying for
+# is how a plugin earns a rate limit for every user sharing the key. Serial is
+# slower only on a cold cache; once warm every call returns synchronously and
+# the whole loop is instant.
+sub _fetchHitsSerially {
+    my ($client, $cb, $seed, $artists) = @_;
+
+    my @queue = @$artists;
+    my @byArtist;
+
+    my $next;
+    $next = sub {
+        my $artist = shift @queue;
+
+        if ( !$artist ) {
+            undef $next;               # break the closure cycle
+            return _buildFeed($client, $cb, $seed, \@byArtist);
+        }
+
+        my $collect = sub {
+            my $hits = shift || [];
+            my $tracks = _matchArtist($artist, $hits);
+            push @byArtist, { name => $artist->{name}, tracks => $tracks } if @$tracks;
+            $next->();
+        };
+
+        Plugins::HitsPlaylist::LFM->topTracks(
+            $collect,
+            sub {
+                # One artist failing must not abandon the whole playlist.
+                $log->error("top tracks failed for '$artist->{name}'");
+                $collect->([]);
+            },
+            $artist->{name},
+            LASTFM_LIMIT,
+        );
+    };
+
+    $next->();
+}
+
+# Resolve one artist's hits against the library, in rank order.
+sub _matchArtist {
+    my ($artist, $hits) = @_;
+
+    return [] unless $hits && @$hits;
+
+    my $local = Plugins::HitsPlaylist::Library->tracks_for_contributor($artist->{contributor});
+    return [] unless @$local;
+
+    # The API returns the same song under several scrobbled titles.
     my $wanted = dedupe_hits([ map { $_->{name} } @$hits ]);
 
-    my (@items, @urls, %preferred_albums, %used);
+    my (@tracks, %preferred_albums, %used);
 
     for my $title (@$wanted) {
-        last if @urls >= MAX_PLAYLIST;
+        last if @tracks >= PER_ARTIST_MAX;
 
         my ($status, $cands) = match_title($title, $local);
-        next if $status eq 'MISS';                 # strict: not owned, skip it
+        next if $status eq 'MISS';              # strict: not owned, skip it
 
         my $track = choose_version($cands,
             preferred_albums => \%preferred_albums,
             ref_live         => is_live_title($title),
         );
         next unless $track;
-        next if $used{ $track->{id} }++;           # two titles, one file
+        next if $used{ $track->{id} }++;
 
         $preferred_albums{ $track->{album_id} }++ if defined $track->{album_id};
+        push @tracks, $track;
+    }
 
-        push @urls, $track->{url};
-        push @items, {
-            name  => $track->{title} . ' - ' . ($track->{album} // ''),
-            type  => 'audio',
-            url   => $track->{url},
-            play  => $track->{url},
-        };
+    return \@tracks;
+}
+
+sub _buildFeed {
+    my ($client, $cb, $seed, $byArtist) = @_;
+
+    if ( !@$byArtist ) {
+        return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] });
+    }
+
+    # Round-robin by rank: every artist's biggest hit, then every artist's
+    # second, and so on. Front-loads the songs people actually know while making
+    # it structurally impossible to get six tracks by one artist in a row, which
+    # is what plain concatenation gives you and what makes a mix feel broken.
+    my (@urls, @items, %usedTrack);
+    my $round = 0;
+
+    ROUND: while ( @urls < MAX_PLAYLIST ) {
+        my $addedThisRound = 0;
+
+        for my $entry (@$byArtist) {
+            next unless $round < scalar @{ $entry->{tracks} };
+
+            my $track = $entry->{tracks}[$round];
+
+            # Cross-artist dedupe: a duet or a cover resolves to one file under
+            # two different artists. "Under Pressure" is the canonical case.
+            next if $usedTrack{ $track->{id} }++;
+
+            push @urls, $track->{url};
+            push @items, {
+                name => $track->{title} . ' - ' . $entry->{name},
+                type => 'audio',
+                url  => $track->{url},
+                play => $track->{url},
+            };
+            $addedThisRound++;
+
+            last ROUND if @urls >= MAX_PLAYLIST;
+        }
+
+        last unless $addedThisRound;
+        $round++;
     }
 
     if ( !@urls ) {
@@ -163,26 +275,24 @@ sub _gotTopTracks {
     # Slim::Networking::IO::Select task, which is a far worse failure than a
     # missing menu entry.
     if ($client) {
-        # Stash for the play+save command rather than threading 40 urls through
-        # a menu action, which jive would have to serialise into the request.
-        $client->pluginData( hits => { artist => $artist, urls => \@urls } );
+        $client->pluginData( hits => { artist => $seed, urls => \@urls } );
 
+        # Counts go HERE, not in the feed title. XMLBrowser overwrites a feed's
+        # title with the menu item's own name ($opml->{title} = $args->{feedTitle}),
+        # so anything set there is silently discarded. This row is the only place
+        # the strict-mode outcome can actually be surfaced, and it matters: a
+        # 12-track result should read as "you own 12 of these", not as a bug.
         unshift @items, {
-            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE')
+                         . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
             type        => 'link',
             url         => \&playAndSave,
-            passthrough => [ { artist => $artist } ],
+            passthrough => [ { artist => $seed } ],
             nextWindow  => 'nowPlaying',
         };
     }
 
-    $cb->({
-        items => \@items,
-        # The header states the strict-mode outcome plainly, so a short playlist
-        # reads as "you own 12 of these" rather than as the plugin misbehaving.
-        title => cstring($client, 'PLUGIN_HITSPLAYLIST_NAME') . ": $artist ("
-               . scalar(@urls) . '/' . scalar(@$wanted) . ')',
-    });
+    $cb->({ items => \@items });
 }
 
 sub playAndSave {
@@ -247,9 +357,12 @@ sub _cliPlaySave {
 # "Hits: Fleetwood Mac" came back as "Hits  Fleetwood Mac" with a double space,
 # because the colon is stripped rather than replaced. A hyphen survives intact
 # and still sorts every generated playlist together in the menu.
+#
+# "Hits Radio - X" rather than "Hits - X" because the playlist is no longer just
+# X's hits: it is X plus similar artists, and the name should not lie about that.
 sub _playlistName {
     my ($artist) = @_;
-    return 'Hits - ' . ($artist // 'Unknown');
+    return 'Hits Radio - ' . ($artist // 'Unknown');
 }
 
 sub _errorItem {
