@@ -87,33 +87,18 @@ My Music > Hits Playlist
 The basket survives a server restart, and it is shared across players rather
 than being tied to whichever one you had selected.
 
-## Putting it in Material's main menu
+## Scripting
 
-By default the plugin's entries live under **More**, because that is where LMS
-puts everything a plugin contributes. If you use Material Skin and would rather
-have them alongside *Add to favorites*, Material supports custom actions.
-
-Create or edit `actions.json` in your LMS preferences directory, under
-`material-skin/`:
+Three commands are available from the LMS CLI or JSON-RPC, for scripts, keypads
+or home automation. Unlike the menus these are self-contained — give them an
+artist and they do the whole job.
 
 ```
-<lms-prefs-dir>/material-skin/actions.json
-```
-
-Copy the contents of [`extras/material-actions.json`](extras/material-actions.json)
-into it, or merge the `artist` section into what you already have. Reload
-Material and **Add to Hits Basket** and **Play hits** appear directly in the
-artist menu, on the artist page and in search results alike.
-
-These use standalone commands, which you can also call from scripts or a
-keypad:
-
-```
-hitsplaylist basketadd    artist_id:1234
-hitsplaylist basketremove artist_id:1234
-<playerid> hitsplaylist playhits artist_id:1234
-<playerid> hitsplaylist playhits artist_id:1234 add:1     append instead of replace
-<playerid> hitsplaylist playhits artist_id:1234 save:1    also save a playlist
+hitsplaylist basketadd    artist_id:N | artist:NAME
+hitsplaylist basketremove artist_id:N | artist:NAME
+<playerid> hitsplaylist playhits artist_id:N
+<playerid> hitsplaylist playhits artist_id:N add:1     append instead of replace
+<playerid> hitsplaylist playhits artist_id:N save:1    also save a playlist
 ```
 
 ## Settings
