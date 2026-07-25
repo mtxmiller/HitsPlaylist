@@ -52,5 +52,19 @@ until curl -s -m 5 -X POST "http://$LMS:$PORT/jsonrpc.js" \
 done
 echo " ready"
 
-echo "==> plugin log"
-ssh "$HOST" 'grep -i hitsplaylist /home/imyourwreck/Docker/lyrion/config/logs/server.log | tail -3' || true
+# Only lines since the current container started. Tailing the whole log shows
+# errors from previous boots and makes a healthy deploy look broken; that cost
+# me a false alarm once already.
+echo "==> plugin log (this boot only)"
+ssh "$HOST" '
+  START=$(docker inspect lms --format "{{.State.StartedAt}}" | cut -c1-19 | tr "T" " ")
+  awk -v s="$START" '"'"'
+    match($0, /^\[([0-9]{2}-[0-9]{2}-[0-9]{2} [0-9:]{8})/, m) {
+      split(m[1], d, /[- :]/)
+      ts = sprintf("20%s-%s-%s %s:%s:%s", d[1], d[2], d[3], d[4], d[5], d[6])
+      show = (ts >= s)
+    }
+    show && tolower($0) ~ /hitsplaylist/
+  '"'"' /home/imyourwreck/Docker/lyrion/config/logs/server.log | tail -5
+' || true
+echo "    (no output above means a clean load)"

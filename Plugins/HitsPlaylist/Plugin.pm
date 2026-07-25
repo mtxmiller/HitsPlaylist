@@ -129,7 +129,7 @@ sub artistInfoMenu {
 
     return [
         {
-            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_HITS_RADIO'),
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_HITS'),
             type        => 'link',
             url         => \&hitsFeed,
             passthrough => [ { artist => $name } ],
@@ -233,6 +233,13 @@ sub basketFeed {
     _buildFromNames($client, $cb, 'Basket', $basket, BASKET_MAX_ARTISTS);
 }
 
+# Artist only. One API call.
+#
+# Expansion used to be the default and it was the wrong default twice over: the
+# basket already covers deliberate multi-artist mixes, and expanding cost 13
+# lookups on every tap for someone who just wanted this artist's hits. The
+# expand option now lives inside the results, which is where the thought
+# "give me more like this" actually occurs.
 sub hitsFeed {
     my ( $client, $cb, $args, $pt ) = @_;
 
@@ -240,11 +247,21 @@ sub hitsFeed {
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] })
         unless $seed;
 
-    # Ask Last.fm who sounds like this artist, then throw away the ones we do
-    # not own BEFORE fetching anybody's hits. find_contributor is a local indexed
-    # lookup and costs nothing; artist.gettoptracks is a network round trip. On a
+    _buildFromNames($client, $cb, $seed, [ $seed ], 1, $seed);
+}
+
+# Reached from the "Expand with similar artists" row inside an artist's hits.
+sub expandFeed {
+    my ( $client, $cb, $args, $pt ) = @_;
+
+    my $seed = $pt->{artist};
+    return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] })
+        unless $seed;
+
+    # Resolve against the library BEFORE fetching anybody's hits. find_contributor
+    # is a local indexed lookup, artist.gettoptracks is a network round trip. On a
     # typical library only a handful of 30 similar artists are owned, so this
-    # turns ~30 API calls into ~6.
+    # turns ~30 API calls into ~12.
     Plugins::HitsPlaylist::LFM->similarArtists(
         sub {
             my $similar = shift || [];
@@ -252,8 +269,6 @@ sub hitsFeed {
                 [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS);
         },
         sub {
-            # No similar-artist data is not fatal: fall back to the seed alone,
-            # which is exactly the v0.1 behaviour.
             my $err = shift;
             $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
             _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS);
@@ -270,7 +285,7 @@ sub hitsFeed {
 # network round trip. Discarding unowned artists before fetching anybody's hits
 # turns ~30 API calls into ~12 on a typical library.
 sub _buildFromNames {
-    my ($client, $cb, $label, $names, $max) = @_;
+    my ($client, $cb, $label, $names, $max, $expandSeed) = @_;
 
     $max ||= MAX_ARTISTS;
 
@@ -298,7 +313,7 @@ sub _buildFromNames {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NOT_IN_LIBRARY') ] });
     }
 
-    _fetchHitsSerially($client, $cb, $label, \@resolved, \@notInLibrary);
+    _fetchHitsSerially($client, $cb, $label, \@resolved, \@notInLibrary, $expandSeed);
 }
 
 # One artist at a time, not a fan-out.
@@ -308,11 +323,16 @@ sub _buildFromNames {
 # slower only on a cold cache; once warm every call returns synchronously and
 # the whole loop is instant.
 sub _fetchHitsSerially {
-    my ($client, $cb, $label, $artists, $notInLibrary) = @_;
+    my ($client, $cb, $label, $artists, $notInLibrary, $expandSeed) = @_;
 
     my @queue = @$artists;
     my @byArtist;
     my @noHitsOwned;
+
+    # PER_ARTIST_MAX exists to stop one artist dominating an interleaved mix.
+    # With a single artist there is nothing to dominate, and capping at 6 makes
+    # "Hits" for a well-represented artist look broken. Let it fill the playlist.
+    my $perArtist = (scalar @$artists == 1) ? MAX_PLAYLIST : PER_ARTIST_MAX;
 
     my $next;
     $next = sub {
@@ -321,12 +341,13 @@ sub _fetchHitsSerially {
         if ( !$artist ) {
             undef $next;               # break the closure cycle
             return _buildFeed($client, $cb, $label, \@byArtist,
-                               { missing => $notInLibrary, noHits => \@noHitsOwned });
+                               { missing => $notInLibrary, noHits => \@noHitsOwned },
+                               $expandSeed);
         }
 
         my $collect = sub {
             my $hits = shift || [];
-            my $tracks = _matchArtist($artist, $hits);
+            my $tracks = _matchArtist($artist, $hits, $perArtist);
             if (@$tracks) {
                 push @byArtist, { name => $artist->{name}, tracks => $tracks };
             }
@@ -355,7 +376,9 @@ sub _fetchHitsSerially {
 
 # Resolve one artist's hits against the library, in rank order.
 sub _matchArtist {
-    my ($artist, $hits) = @_;
+    my ($artist, $hits, $max) = @_;
+
+    $max ||= PER_ARTIST_MAX;
 
     return [] unless $hits && @$hits;
 
@@ -368,7 +391,7 @@ sub _matchArtist {
     my (@tracks, %preferred_albums, %used);
 
     for my $title (@$wanted) {
-        last if @tracks >= PER_ARTIST_MAX;
+        last if @tracks >= $max;
 
         my ($status, $cands) = match_title($title, $local);
         next if $status eq 'MISS';              # strict: not owned, skip it
@@ -388,7 +411,7 @@ sub _matchArtist {
 }
 
 sub _buildFeed {
-    my ($client, $cb, $label, $byArtist, $skipped) = @_;
+    my ($client, $cb, $label, $byArtist, $skipped, $expandSeed) = @_;
 
     if ( !@$byArtist ) {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] });
@@ -442,7 +465,16 @@ sub _buildFeed {
     # Slim::Networking::IO::Select task, which is a far worse failure than a
     # missing menu entry.
     if ($client) {
-        $client->pluginData( hits => { artist => $label, urls => \@urls } );
+        # Name reflects what was actually built, not which button was pressed.
+        my $playlistName = (scalar @$byArtist > 1)
+                         ? "Hits Radio - $label"
+                         : "Hits - $label";
+
+        $client->pluginData( hits => {
+            artist => $label,
+            urls   => \@urls,
+            name   => $playlistName,
+        } );
 
         # Counts go HERE, not in the feed title. XMLBrowser overwrites a feed's
         # title with the menu item's own name ($opml->{title} = $args->{feedTitle}),
@@ -456,7 +488,7 @@ sub _buildFeed {
         unshift @items,
             {
                 name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_ALL')
-                             . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
+                             . _countSuffix(scalar @urls, scalar @$byArtist),
                 type        => 'link',
                 url         => \&playHits,
                 passthrough => [ { artist => $label, cmd => 'playtracks', save => 0 } ],
@@ -477,6 +509,18 @@ sub _buildFeed {
                 passthrough => [ { artist => $label, cmd => 'playtracks', save => 1 } ],
                 nextWindow  => 'nowPlaying',
             };
+    }
+
+    # Offered only on the artist-only view. Sits after the action rows and before
+    # the tracks: you have just seen this artist's hits, and that is the moment
+    # "give me more like this" occurs to you.
+    if ($expandSeed) {
+        splice @items, ($client ? 3 : 0), 0, {
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_EXPAND'),
+            type        => 'link',
+            url         => \&expandFeed,
+            passthrough => [ { artist => $expandSeed } ],
+        };
     }
 
     # Say why the result is smaller than what was asked for.
@@ -530,7 +574,7 @@ sub playHits {
         });
     }
 
-    my $name = _playlistName($data->{artist});
+    my $name = $data->{name} || _playlistName($data->{artist});
     $client->execute([ 'playlist', 'save', $name ]);
 
     $cb->({
@@ -573,7 +617,7 @@ sub _cliPlay {
 
     # Which verb was dispatched decides whether we also save.
     if ( $verb eq 'playsave' ) {
-        my $name = _playlistName($data->{artist});
+        my $name = $data->{name} || _playlistName($data->{artist});
         $client->execute([ 'playlist', 'save', $name ]);
         $request->addResult('playlist', $name);
     }
@@ -588,6 +632,14 @@ sub _cliPlay {
 #
 # "Hits Radio - X" rather than "Hits - X" because the playlist is no longer just
 # X's hits: it is X plus similar artists, and the name should not lie about that.
+# "(6 tracks, 1 artists)" reads as a bug even when the number is right.
+sub _countSuffix {
+    my ($tracks, $artists) = @_;
+    return $artists > 1
+         ? sprintf(' (%d tracks, %d artists)', $tracks, $artists)
+         : sprintf(' (%d tracks)', $tracks);
+}
+
 sub _playlistName {
     my ($artist) = @_;
     return 'Hits Radio - ' . ($artist // 'Unknown');
