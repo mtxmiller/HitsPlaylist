@@ -19,7 +19,7 @@ use Exporter 'import';
 our @EXPORT_OK = qw(
     normalize_title normalize_artist bare_title
     is_live_title is_live_album similarity
-    match_title choose_version
+    match_title choose_version dedupe_hits
 );
 
 # ---------------------------------------------------------------------------
@@ -389,6 +389,36 @@ sub choose_version {
     } @scored;
 
     return $scored[0];
+}
+
+# ---------------------------------------------------------------------------
+# Incoming hit-list dedupe
+#
+# Last.fm's artist.getTopTracks is scrobble-weighted, and listeners scrobble the
+# same song under several titles. A real top-10 for The Notorious B.I.G. contains
+# "Big Poppa" three times in different disguises; Santana's contains both
+# "Smooth (feat. Rob Thomas)" and "Smooth", and both "Black Magic Woman" and
+# "Black Magic Woman - Single Version".
+#
+# Every downstream stage then behaves correctly and still produces a playlist
+# with the same song three times. This has to be fixed at the source, before
+# matching, or the per-artist quota gets spent on duplicates.
+#
+# Keeps the FIRST occurrence, which is the highest-ranked one.
+# ---------------------------------------------------------------------------
+
+sub dedupe_hits {
+    my ($titles) = @_;
+    return [] unless $titles && @$titles;
+
+    my (%seen, @out);
+    for my $t (@$titles) {
+        my $key = normalize_title($t);
+        next unless length $key;
+        next if $seen{$key}++;
+        push @out, $t;
+    }
+    return \@out;
 }
 
 sub _looks_like_compilation {

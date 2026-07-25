@@ -16,7 +16,7 @@ use lib 'lib';
 use HitsPlaylist::Matcher qw(
     normalize_title normalize_artist bare_title
     is_live_title is_live_album similarity
-    match_title choose_version
+    match_title choose_version dedupe_hits
 );
 
 binmode(Test::More->builder->$_, ':encoding(UTF-8)')
@@ -195,6 +195,34 @@ subtest 'deterministic on a true tie' => sub {
 # ---------------------------------------------------------------------------
 # Artist normalization
 # ---------------------------------------------------------------------------
+
+subtest 'BUG 6: incoming hits list contains the same song repeatedly' => sub {
+    # Verbatim from live artist.getTopTracks output. Scrobblers submit the same
+    # song under many titles, so the API returns it many times. Every downstream
+    # stage then behaves correctly and still yields a playlist with one song on
+    # it three times.
+    my $biggie = dedupe_hits([
+        'Big Poppa - 2005 Remaster',
+        'Big Poppa',
+        'Big Poppa (feat. Puff Daddy)',
+        'Hypnotize - 2014 Remaster',
+        'Hypnotize',
+    ]);
+    is scalar(@$biggie), 2, 'five titles collapse to two songs';
+    is $biggie->[0], 'Big Poppa - 2005 Remaster', 'keeps the highest-ranked variant';
+
+    my $santana = dedupe_hits([
+        'Smooth (feat. Rob Thomas)',
+        'Black Magic Woman',
+        'Smooth',
+        'Black Magic Woman - Single Version',
+    ]);
+    is scalar(@$santana), 2, 'feat. and single-version variants collapse';
+
+    is_deeply dedupe_hits(['A Song', 'Another Song']), ['A Song', 'Another Song'],
+        'leaves a clean list alone';
+    is_deeply dedupe_hits([]), [], 'empty list';
+};
 
 subtest 'artist normalization' => sub {
     is normalize_artist('The Notorious B.I.G.'), 'notorious b i g', 'punctuation and article';

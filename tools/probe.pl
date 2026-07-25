@@ -24,7 +24,8 @@ use JSON::PP;
 use HTTP::Tiny;
 use Getopt::Long;
 use FindBin;
-use HitsPlaylist::Matcher qw(normalize_title normalize_artist bare_title is_live_title is_live_album match_title choose_version);
+use HitsPlaylist::Matcher qw(normalize_title normalize_artist bare_title is_live_title is_live_album match_title choose_version dedupe_hits);
+use HitsPlaylist::LastFm qw(top_tracks);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -33,11 +34,15 @@ my $HOST    = '192.168.1.8';
 my $PORT    = 9000;
 my $FILE    = "$FindBin::Bin/hits-probe.txt";
 my $VERBOSE = 0;
+my $LASTFM  = 0;      # pull real titles from Last.fm instead of the hand-authored file
+my $TOP     = 10;
 
 GetOptions(
     'host=s'  => \$HOST,
     'port=i'  => \$PORT,
     'file=s'  => \$FILE,
+    'lastfm'  => \$LASTFM,
+    'top=i'   => \$TOP,
     'verbose' => \$VERBOSE,
 ) or die "bad options\n";
 
@@ -157,10 +162,26 @@ my ($order, $hits) = load_hits($FILE);
 @$order = grep { lc($_) eq lc($ONLY) } @$order if defined $ONLY;
 die "no such artist in $FILE: $ONLY\n" unless @$order;
 
-my %tally = (MATCH => 0, AMBIG => 0, MISS => 0, NOARTIST => 0);
+my %tally = (MATCH => 0, AMBIG => 0, MISS => 0, DUPE => 0, NOARTIST => 0);
+
+# Track ids already used by ANY artist this run. Catches the cross-artist case
+# from the design doc: "Under Pressure" arrives under both Queen and Bowie.
+my %used_track_ids;
 my @review;   # things a human should look at
 
-printf "probe: %s  |  %d artists  |  library %s:%d\n", $FILE, scalar(@$order), $HOST, $PORT;
+printf "probe: %s  |  %d artists  |  library %s:%d  |  titles from %s\n",
+    $FILE, scalar(@$order), $HOST, $PORT,
+    $LASTFM ? "LAST.FM (top $TOP)" : 'hand-authored file';
+
+# --lastfm keeps the SAME artist list but replaces the hand-authored titles with
+# real API output. That makes the two runs directly comparable: any change in the
+# numbers is caused by messier input, not by a different set of songs.
+if ($LASTFM) {
+    for my $artist (@$order) {
+        my $tt = top_tracks($artist, $TOP);
+        $hits->{$artist} = [ map { $_->{name} } @$tt ];
+    }
+}
 
 for my $artist (@$order) {
     my ($local_artist, $how) = resolve_artist($artist);
@@ -183,7 +204,16 @@ for my $artist (@$order) {
     my %preferred_albums;
     my $rank = 0;
 
-    for my $want (@{ $hits->{$artist} }) {
+    # Dedupe the incoming list before matching, or the per-artist quota gets
+    # spent on the same song under several scrobbled titles.
+    my $wanted = dedupe_hits($hits->{$artist});
+    my $dropped = scalar(@{ $hits->{$artist} }) - scalar(@$wanted);
+    if ($dropped) {
+        printf "  (%d duplicate title%s dropped from the incoming hits list)\n",
+            $dropped, $dropped == 1 ? '' : 's';
+    }
+
+    for my $want (@$wanted) {
         $rank++;
         my ($status, $cands) = match_title($want, $tracks);
         $tally{$status}++;
@@ -194,6 +224,15 @@ for my $artist (@$order) {
         }
 
         my $chosen = choose_version($cands, preferred_albums => \%preferred_albums, ref_live => is_live_title($want));
+
+        # Two different wanted titles can still resolve to the same file.
+        if ($used_track_ids{ $chosen->{id} }++) {
+            $tally{$status}--;
+            $tally{DUPE}++;
+            printf "  %2d %-38s DUPE    already chosen: %s\n", $rank, _trunc($want, 38), _trunc($chosen->{title}, 42);
+            next;
+        }
+
         $preferred_albums{ $chosen->{album_id} }++ if defined $chosen->{album_id};
 
         printf "  %2d %-38s %-7s %s\n", $rank, _trunc($want, 38), $status, fmt_track($chosen);
@@ -211,12 +250,13 @@ for my $artist (@$order) {
 
 # --------------------------------------------------------------------------
 
-my $total = $tally{MATCH} + $tally{AMBIG} + $tally{MISS} + $tally{NOARTIST};
+my $total = $tally{MATCH} + $tally{AMBIG} + $tally{MISS} + $tally{DUPE} + $tally{NOARTIST};
 print "\n", '=' x 100, "\n";
 printf "TOTALS over %d wanted tracks\n", $total;
 printf "  MATCH     %4d  (%.0f%%)   single unambiguous local track\n", $tally{MATCH}, 100 * $tally{MATCH} / ($total || 1);
 printf "  AMBIG     %4d  (%.0f%%)   several versions, one chosen - READ THESE\n", $tally{AMBIG}, 100 * $tally{AMBIG} / ($total || 1);
 printf "  MISS      %4d  (%.0f%%)   not in library (expected, strict mode)\n", $tally{MISS}, 100 * $tally{MISS} / ($total || 1);
+printf "  DUPE      %4d  (%.0f%%)   resolved to an already-chosen track\n", $tally{DUPE}, 100 * $tally{DUPE} / ($total || 1);
 printf "  NOARTIST  %4d  (%.0f%%)   artist absent entirely\n", $tally{NOARTIST}, 100 * $tally{NOARTIST} / ($total || 1);
 
 if (@review) {
