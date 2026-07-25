@@ -65,6 +65,22 @@ sub find_contributor {
     return undef;
 }
 
+# Contributor name from its id. Material's custom actions hand us $ARTISTID,
+# so the name has to be looked up rather than assumed.
+sub contributor_name {
+    my ($class, $id) = @_;
+    return undef unless $id && $id =~ /^\d+$/;
+
+    my $sth = Slim::Schema->dbh->prepare_cached(q{
+        SELECT name FROM contributors WHERE id = ? LIMIT 1
+    });
+    $sth->execute($id);
+    my ($name) = $sth->fetchrow_array;
+    $sth->finish;
+
+    return $name ? Slim::Utils::Unicode::utf8decode($name) : undef;
+}
+
 # Every track credited to this contributor in any of the roles we care about,
 # pre-normalized so the matcher can work on it directly.
 sub tracks_for_contributor {

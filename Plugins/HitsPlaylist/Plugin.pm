@@ -99,6 +99,20 @@ sub initPlugin {
         ['hitsplaylist', 'playsave'], [1, 0, 1, \&_cliPlay]
     );
 
+    # Self-contained commands, for Material Skin custom actions and scripting.
+    # Unlike the three above, these do not depend on a feed having been built
+    # first: give them an artist and they do the whole job. Material hands us
+    # $ARTISTID from whichever menu the user opened.
+    Slim::Control::Request::addDispatch(
+        ['hitsplaylist', 'basketadd'],    [0, 0, 1, \&_cliBasket]
+    );
+    Slim::Control::Request::addDispatch(
+        ['hitsplaylist', 'basketremove'], [0, 0, 1, \&_cliBasket]
+    );
+    Slim::Control::Request::addDispatch(
+        ['hitsplaylist', 'playhits'],     [1, 0, 1, \&_cliPlayHits]
+    );
+
     # menu => 'myMusic' rather than is_app => 1. OPMLBased forces menu='apps'
     # whenever is_app is set (OPMLBased.pm:23-26) and Apps is the streaming
     # service shelf. This plugin never leaves the local library, so it belongs
@@ -698,6 +712,99 @@ sub _countSuffix {
     return $artists > 1
          ? sprintf(' (%d tracks, %d artists)', $tracks, $artists)
          : sprintf(' (%d tracks)', $tracks);
+}
+
+# Resolve whatever the caller gave us into an artist name.
+# Material substitutes $ARTISTID in some menus and $ARTISTNAME in others, so
+# accept either rather than making the user care which menu they are in.
+sub _artistFromRequest {
+    my ($request) = @_;
+
+    if ( my $id = $request->getParam('artist_id') ) {
+        if ( my $name = Plugins::HitsPlaylist::Library->contributor_name($id) ) {
+            return $name;
+        }
+    }
+    my $name = $request->getParam('artist');
+    return ($name && length $name) ? $name : undef;
+}
+
+sub _cliBasket {
+    my $request = shift;
+
+    if ( $request->isNotCommand([['hitsplaylist'], ['basketadd', 'basketremove']]) ) {
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    my $name = _artistFromRequest($request);
+    if ( !$name ) {
+        $request->addResult('error', 'no artist');
+        $request->setStatusDone();
+        return;
+    }
+
+    my $basket = _basket();
+
+    if ( $request->getRequest(1) eq 'basketremove' ) {
+        _basketSet([ grep { lc $_ ne lc $name } @$basket ]);
+    }
+    elsif ( !_basketHas($name) ) {          # add is idempotent
+        _basketSet([ @$basket, $name ]);
+    }
+
+    $request->addResult('artist', $name);
+    $request->addResult('count', scalar @{ _basket() });
+    $request->setStatusDone();
+}
+
+# Build this artist's hits and play them, in one command. No navigation, no
+# prior feed. This is what a Material custom action can actually drive.
+sub _cliPlayHits {
+    my $request = shift;
+
+    my $client = $request->client;
+    if ( !$client ) {
+        $request->setStatusNeedsClient();
+        return;
+    }
+    if ( $request->isNotCommand([['hitsplaylist'], ['playhits']]) ) {
+        $request->setStatusBadDispatch();
+        return;
+    }
+
+    my $name = _artistFromRequest($request);
+    if ( !$name ) {
+        $request->addResult('error', 'no artist');
+        $request->setStatusDone();
+        return;
+    }
+
+    my $save = $request->getParam('save') ? 1 : 0;
+    my $cmd  = $request->getParam('add')  ? 'addtracks' : 'playtracks';
+
+    # Async: tell the CLI layer to hold the request open until Last.fm answers.
+    $request->setStatusProcessing();
+
+    _buildFromNames($client, sub {
+        my $feed = shift;
+
+        my $data = $client->pluginData('hits') || {};
+        my $urls = $data->{urls} || [];
+
+        if (@$urls) {
+            $client->execute([ 'playlist', $cmd, 'listRef', $urls ]);
+            if ($save) {
+                my $pl = $data->{name} || _playlistName($name);
+                $client->execute([ 'playlist', 'save', $pl ]);
+                $request->addResult('playlist', $pl);
+            }
+        }
+
+        $request->addResult('artist', $name);
+        $request->addResult('count', scalar @$urls);
+        $request->setStatusDone();
+    }, $name, [ $name ], 1, undef, 1);
 }
 
 sub _playlistName {

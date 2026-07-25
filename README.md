@@ -32,21 +32,89 @@ No Last.fm account or API key is needed.
 
 ## Using it
 
-Everything appears in your normal artist menu, so it works in Material, iPeng,
-the web interface, hardware Squeezeboxes and LyrPlay alike.
+Everything appears in your normal artist menus, so it works the same in Material,
+iPeng, the web interface, hardware Squeezeboxes and LyrPlay.
 
-**Artist > Hits** — that artist's most popular songs, limited to the ones in your
-library. From there you can play them, add them to the end of your queue, or save
-them as a playlist.
+### Hits, for one artist
 
-**Expand with similar artists** — inside that list. Widens the playlist to
-include artists Last.fm considers similar, interleaved so you never get several
-tracks by the same artist in a row.
+Open any artist, then the artist menu. In Material that is the **⋮** button on the
+artist page, or long-press / right-click an artist anywhere. Choose **More**, then
+**Hits**.
 
-**Artist > Add to Hits Basket** — collect artists as you browse. When you are
-ready, go to **My Music > Hits Playlist** and build one playlist from all of
-them. The basket is remembered between restarts, and tapping an artist in the
-list removes it.
+```
+Hits
+    Play all (30 tracks)          replace the queue and start playing
+    Add to end of queue           keep what is playing, add these after
+    Play all and save as playlist saves as "Hits - Mt. Joy"
+    Expand with similar artists   widen it, see below
+    Silver Lining - Mt. Joy
+    Dirty Love - Mt. Joy
+    ...
+```
+
+The list is shown rather than played immediately, so you can see what you are
+about to get.
+
+### Expanding to similar artists
+
+Inside that list, **Expand with similar artists** rebuilds it using artists
+Last.fm considers similar to this one, limited to artists you already own. Tracks
+are interleaved by popularity, so you get everyone's biggest song before anyone's
+second, and never several tracks by the same artist in a row.
+
+This is a separate step because it costs about a dozen Last.fm lookups, where
+plain **Hits** costs one.
+
+### The Hits Basket, for several artists
+
+To combine artists that Last.fm would not connect on its own:
+
+1. Browse to an artist, open the artist menu, choose **More > Add to Hits Basket**
+2. Repeat for as many artists as you like — keep browsing normally in between
+3. Go to **My Music > Hits Playlist**
+4. Choose **Build from basket**
+
+```
+My Music > Hits Playlist
+    Build from basket (5)
+    Clear basket
+    Taylor Swift          tap any artist to remove it
+    Mt. Joy
+    The Killers
+    ...
+```
+
+The basket survives a server restart, and it is shared across players rather
+than being tied to whichever one you had selected.
+
+## Putting it in Material's main menu
+
+By default the plugin's entries live under **More**, because that is where LMS
+puts everything a plugin contributes. If you use Material Skin and would rather
+have them alongside *Add to favorites*, Material supports custom actions.
+
+Create or edit `actions.json` in your LMS preferences directory, under
+`material-skin/`:
+
+```
+<lms-prefs-dir>/material-skin/actions.json
+```
+
+Copy the contents of [`extras/material-actions.json`](extras/material-actions.json)
+into it, or merge the `artist` section into what you already have. Reload
+Material and **Add to Hits Basket** and **Play hits** appear directly in the
+artist menu, on the artist page and in search results alike.
+
+These use standalone commands, which you can also call from scripts or a
+keypad:
+
+```
+hitsplaylist basketadd    artist_id:1234
+hitsplaylist basketremove artist_id:1234
+<playerid> hitsplaylist playhits artist_id:1234
+<playerid> hitsplaylist playhits artist_id:1234 add:1     append instead of replace
+<playerid> hitsplaylist playhits artist_id:1234 save:1    also save a playlist
+```
 
 ## Settings
 
