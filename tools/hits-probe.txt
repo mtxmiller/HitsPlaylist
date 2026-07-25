@@ -1,0 +1,192 @@
+# Hand-authored "hits" lists for probing the matcher.
+#
+# These are NOT Last.fm data. They stand in for it so the matcher can be tuned
+# before any API key exists. Last.fm's job is only to produce (artist, title)
+# strings; the matcher never knows where they came from. When the real API is
+# wired up, this file gets replaced by its output and nothing else changes.
+#
+# Artists chosen from the test library at 192.168.1.8 (LMS 9.1.1, 1422 artists,
+# 920 albums, 10,340 tracks), biased toward the ones with enough albums to make
+# version selection actually hard.
+#
+# Format:  [Artist Name] then one title per line, roughly in popularity order.
+
+[Taylor Swift]
+# 14 albums. The worst version-selection problem in modern music:
+# (Taylor's Version) and (From The Vault) coexist with the originals.
+Shake It Off
+Blank Space
+Love Story
+You Belong with Me
+Anti-Hero
+Cruel Summer
+Style
+Bad Blood
+We Are Never Ever Getting Back Together
+All Too Well
+
+[Dave Matthews Band]
+# 11 albums in a famously live-heavy catalog. Exercises the live-vs-studio rule.
+Ants Marching
+Crash Into Me
+Satellite
+What Would You Say
+Too Much
+Grey Street
+The Space Between
+Where Are You Going
+
+[Santana]
+# "Smooth" and "Corazon Espinado" are featured-artist cases.
+# "Corazon Espinado" also tests diacritic stripping.
+Smooth
+Maria Maria
+Black Magic Woman
+Oye Como Va
+Corazon Espinado
+Evil Ways
+Put Your Lights On
+Samba Pa Ti
+
+[Kenny Chesney]
+# 19 albums, country, heavy greatest-hits compilation overlap.
+No Shoes No Shirt No Problems
+She Thinks My Tractor's Sexy
+Summertime
+American Kids
+Don't Blink
+Young
+When the Sun Goes Down
+Come Over
+
+[The Black Crowes]
+Hard to Handle
+She Talks to Angels
+Remedy
+Twice As Hard
+Jealous Again
+Thorn in My Pride
+
+[Zac Brown Band]
+Chicken Fried
+Toes
+Colder Weather
+Knee Deep
+Free
+Sweet Annie
+Homegrown
+
+[Rage Against the Machine]
+Killing in the Name
+Bulls on Parade
+Guerrilla Radio
+Bombtrack
+Testify
+Sleep Now in the Fire
+Know Your Enemy
+
+[Arctic Monkeys]
+Do I Wanna Know?
+R U Mine?
+505
+Why'd You Only Call Me When You're High?
+I Bet You Look Good on the Dancefloor
+Fluorescent Adolescent
+
+[Ed Sheeran]
+Shape of You
+Perfect
+Thinking Out Loud
+Photograph
+Castle on the Hill
+The A Team
+Bad Habits
+
+[Keith Urban]
+Somebody Like You
+Blue Ain't Your Color
+Long Hot Summer
+Days Go By
+You'll Think of Me
+Stupid Boy
+
+[Maroon 5]
+This Love
+She Will Be Loved
+Sugar
+Moves Like Jagger
+Payphone
+Girls Like You
+Harder to Breathe
+
+[Mt. Joy]
+Silver Lining
+Astrovan
+Sheep
+Julia
+Strangers
+
+[The Notorious B.I.G.]
+# Punctuation-heavy artist name. Also a catalog full of (feat. ...) titles.
+Juicy
+Big Poppa
+Hypnotize
+Mo Money Mo Problems
+One More Chance
+
+[Fleetwood Mac]
+Dreams
+Go Your Own Way
+The Chain
+Landslide
+Rhiannon
+Everywhere
+Little Lies
+
+[Led Zeppelin]
+Stairway to Heaven
+Whole Lotta Love
+Black Dog
+Immigrant Song
+Kashmir
+Rock and Roll
+
+[The Beatles]
+# Mono vs stereo box sets are the tie the matcher cannot break: same title,
+# same year, and "mono" lives in the ALBUM title where title normalization
+# cannot see it. Expect AMBIG here and accept it.
+Hey Jude
+Let It Be
+Come Together
+Yesterday
+Here Comes the Sun
+Something
+
+[Talking Heads]
+Once in a Lifetime
+Burning Down the House
+Psycho Killer
+This Must Be the Place
+Road to Nowhere
+
+[Bruce Springsteen]
+# Name drift: library may store "Bruce Springsteen & the E Street Band".
+Born to Run
+Dancing in the Dark
+Thunder Road
+Born in the U.S.A.
+Glory Days
+The River
+
+[Rebelution]
+Feeling Alright
+Sky Is the Limit
+Safe and Sound
+Attention Span
+
+[The Chainsmokers]
+Closer
+Don't Let Me Down
+Roses
+Something Just Like This
+Paris
