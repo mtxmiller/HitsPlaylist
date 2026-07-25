@@ -84,6 +84,47 @@ Kept as a record, because each one was invisible until a human read the output:
    to `juicy`, tied on every signal, and the winner was decided by whichever had the
    lower track id. A candidate needing no stripping now scores above one that did.
 
+## Installing (manual, v0.1.0)
+
+There is no `repo.xml` yet on purpose. Copy the folder and restart.
+
+```bash
+# 1. find the plugin directory on the LMS host
+ls -d /var/lib/squeezeboxserver/cache/InstalledPlugins/Plugins 2>/dev/null || \
+ls -d /usr/share/squeezeboxserver/Plugins 2>/dev/null || \
+find / -maxdepth 6 -type d -name InstalledPlugins 2>/dev/null
+
+# 2. sync the matcher, then copy the plugin over
+./tools/sync-matcher.sh
+scp -r Plugins/HitsPlaylist <host>:<plugin-dir>/
+
+# 3. restart LMS  (this stops playback on every player)
+sudo systemctl restart logitechmediaserver     # or lyrionmusicserver, or squeezeboxserver
+
+# 4. watch it load
+tail -f /var/log/squeezeboxserver/server.log | grep -i hitsplaylist
+```
+
+Then browse to any artist you own and look for **Hits Radio** in the artist menu.
+
+To raise the log level: Settings > Advanced > Logging > `plugin.hitsplaylist` > Debug.
+
+## Verified, not assumed
+
+Things checked against real sources rather than recalled, with where:
+
+| Claim | Source |
+|---|---|
+| `tracks.titlesearch`, `contributors.namesearch` exist | slimserver `SQL/SQLite/schema_1_up.sql` (the lyrion.org reference page omits them) |
+| roles 1 Artist, 2 Composer, 3 Conductor, 4 Band, 5 Album artist, 6 Track artist | same schema + lyrion.org |
+| `albums.compilation` is a real boolean column | same schema |
+| `registerInfoProvider` belongs in `postinitPlugin` | LastMix `Plugin.pm:38` |
+| enqueue via `playlist playtracks listRef` with plain urls | LastMix `CLI.pm:91` |
+| API key convention: `install.xml` `<id2>`, dashes stripped | LastMix `LFM.pm:22`, `LFM.pm:430` |
+| `_pluginDataFor` is provided by the base class | slimserver `Slim/Plugin/Base.pm:111` |
+| a `type => 'link'` item may use `url => \&coderef` with `passthrough` | slimserver `Slim/Control/XMLBrowser.pm:471,494` |
+| handler signature is `($client, $cb, $args, @passthrough)` | slimserver `Slim/Control/XMLBrowser.pm:525` |
+
 ## Design doc
 
 Full rationale, the landscape survey, the cross-model review, and the complete matcher
