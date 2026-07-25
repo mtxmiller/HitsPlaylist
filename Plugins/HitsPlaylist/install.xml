@@ -1,0 +1,32 @@
+<?xml version='1.0' standalone='yes'?>
+<extension>
+	<name>PLUGIN_HITSPLAYLIST_NAME</name>
+	<creator>Eric Miller</creator>
+	<defaultState>enabled</defaultState>
+	<description>PLUGIN_HITSPLAYLIST_DESC</description>
+	<category>playlists</category>
+	<email>ericlmiller@gmail.com</email>
+	<id>024af36d-f1b9-49db-9662-8969c0eab89f</id>
+	<!--
+		id2 is the Last.fm API key, UUID-formatted, dashes stripped at runtime.
+		Same convention LastMix uses (see LFM.pm:22 there), so end users register
+		nothing and the plugin works on install.
+
+		This is obfuscation, not secrecy: anyone who clones a public repo has it,
+		and Last.fm can revoke it. That tradeoff is accepted deliberately, and the
+		30-day response cache keeps aggregate traffic on one shared key low.
+		Users who prefer their own can override it in settings.
+
+		Rotate at last.fm/api/accounts before the first public push if you want a
+		key that has never appeared anywhere else.
+	-->
+	<id2>2597fa76-a071-ef62-7f98-07ab2571e3bc</id2>
+	<module>Plugins::HitsPlaylist::Plugin</module>
+	<targetApplication>
+		<id>SqueezeCenter</id>
+		<minVersion>8.0</minVersion>
+		<maxVersion>*</maxVersion>
+	</targetApplication>
+	<type>2</type>
+	<version>0.1.0</version>
+</extension>

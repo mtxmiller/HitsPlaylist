@@ -1,0 +1,29 @@
+PLUGIN_HITSPLAYLIST_NAME
+	EN	Hits Playlist
+
+PLUGIN_HITSPLAYLIST_DESC
+	EN	Build a saved playlist of an artist's actual hits, drawn from your own library. Uses Last.fm popularity data to pick the tracks, then matches them against the music you already own.
+
+PLUGIN_HITSPLAYLIST_HITS_RADIO
+	EN	Hits Radio
+
+PLUGIN_HITSPLAYLIST_PLAY_SAVE
+	EN	Play all and save as playlist
+
+PLUGIN_HITSPLAYLIST_SAVED
+	EN	Saved playlist
+
+PLUGIN_HITSPLAYLIST_NO_ARTIST
+	EN	No artist to look up
+
+PLUGIN_HITSPLAYLIST_LOOKUP_FAILED
+	EN	Could not reach Last.fm
+
+PLUGIN_HITSPLAYLIST_NO_HITS
+	EN	Last.fm has no top tracks for this artist
+
+PLUGIN_HITSPLAYLIST_NOT_IN_LIBRARY
+	EN	This artist is not in your library
+
+PLUGIN_HITSPLAYLIST_NO_MATCHES
+	EN	None of this artist's hits are in your library
