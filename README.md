@@ -1,172 +1,115 @@
 # HitsPlaylist
 
-A plugin for [Lyrion Music Server](https://lyrion.org) (formerly Logitech Media
-Server) that builds a **finite, saved playlist of an artist's actual hits, drawn
-from your own library**.
+A plugin for [Lyrion Music Server](https://lyrion.org) that builds a playlist of
+an artist's biggest songs — from the music you already own.
+
+Pick an artist, get their hits. Nothing is streamed, nothing is downloaded, and
+you end up with a real saved playlist rather than an endless shuffle.
 
 ```
-Artist > Hits
+Mt. Joy > Hits
     Play all (30 tracks)
     Add to end of queue
     Play all and save as playlist
     Expand with similar artists
     Silver Lining - Mt. Joy
     Dirty Love - Mt. Joy
+    Sheep - Mt. Joy
     ...
 ```
 
-Last.fm decides which songs are the hits. Your library decides which of those you
-actually own. Nothing is streamed and nothing is downloaded.
-
-## Why this exists
-
-Every existing option in this ecosystem has one half of the problem solved:
-
-| | shape | popularity data |
-|---|---|---|
-| LastMix + Don't Stop The Music | infinite drip, ~5 tracks at a time | Last.fm *similar artists* |
-| SQLPlayList / DynamicPlaylists | saved playlists | local metadata only |
-| Random Play | shuffle by genre | none |
-| MusicIP | acoustic similarity | local analysis |
-
-None of them takes a set of artists and hands you a finite list of their actual
-hits. Don't Stop The Music gets closest, but it never gives you an **object** —
-you cannot look at what is coming, save it, replay Tuesday's mix on Friday, or
-send it to anyone.
-
-## Features
-
-- **Artist > Hits** — that artist's most popular tracks, filtered to what you own
-- **Expand with similar artists** — the same, plus artists Last.fm says are alike,
-  interleaved so no two consecutive tracks share an artist
-- **Hits Basket** — add artists while browsing normally, then build one playlist
-  from all of them. `My Music > Hits Playlist`
-- Play, append to queue, or save as a named playlist
-- Appears in Material, iPeng, the web UI, hardware Squeezeboxes and LyrPlay with
-  no client-side work, because it registers through `Slim::Menu::ArtistInfo`
-
 ## Install
 
-Add this repository URL in **Settings > Plugins > Additional Repositories**:
+In LMS, go to **Settings > Plugins > Additional Repositories** and add:
 
 ```
-https raw.githubusercontent.com/mtxmiller/HitsPlaylist/main/repo.xml
+https://raw.githubusercontent.com/mtxmiller/HitsPlaylist/main/repo.xml
 ```
 
-(as a normal `https://` URL — written with a space above only to keep it out of
-link scrapers). Then install **Hits Playlist** from the plugin list and restart.
+Install **Hits Playlist** from the plugin list, then restart the server.
 
-No Last.fm account or API key is required. One is built in, the same way LastMix
-does it. If you would rather use your own, put it in the plugin settings.
+No Last.fm account or API key is needed.
+
+## Using it
+
+Everything appears in your normal artist menu, so it works in Material, iPeng,
+the web interface, hardware Squeezeboxes and LyrPlay alike.
+
+**Artist > Hits** — that artist's most popular songs, limited to the ones in your
+library. From there you can play them, add them to the end of your queue, or save
+them as a playlist.
+
+**Expand with similar artists** — inside that list. Widens the playlist to
+include artists Last.fm considers similar, interleaved so you never get several
+tracks by the same artist in a row.
+
+**Artist > Add to Hits Basket** — collect artists as you browse. When you are
+ready, go to **My Music > Hits Playlist** and build one playlist from all of
+them. The basket is remembered between restarts, and tapping an artist in the
+list removes it.
 
 ## Settings
 
 **Settings > Plugins > Hits Playlist**
 
-| Setting | Default | Notes |
+| Setting | Default | |
 |---|---|---|
-| Playlist length | 40 | Strict matching means you may get fewer |
-| Similar artists to include | 12 | Counts only artists already in your library |
-| When you own several versions | greatest hits | Or prefer the original studio album |
-| Last.fm API key | *(blank)* | Optional override of the built-in key |
+| Playlist length | 40 | How many tracks to aim for |
+| Similar artists to include | 12 | Only counts artists you already own |
+| When you own several versions | Greatest hits | Or prefer the original studio album |
+| Last.fm API key | *(blank)* | Optional. Uses a built-in key otherwise |
 
-## Strict by design
+## Why your playlist might be short
 
-If a hit is not in your library it is skipped. Playlists come out short and
-uneven, and that is deliberate: a 12-track result means *you own 12 of these*,
-not that something failed. When an artist you explicitly asked for contributes
-nothing, the plugin says so at the end of the list rather than letting them
-silently vanish.
+If you do not own one of an artist's hits, it is skipped rather than replaced.
+A playlist that comes back with 12 tracks means **you own 12 of these songs** —
+it is telling you something about your library, not failing.
 
-## The interesting part
+If an artist you asked for contributes nothing at all, the plugin says so at the
+bottom of the list instead of quietly leaving them out.
 
-The API call is 40 lines. **The matcher is the product.**
+## Limitations
 
-Given `("Pink Floyd", "Comfortably Numb")` from an external source, find the
-right local track in a library that contains the studio cut, a 2011 remaster, and
-a live version from *Delicate Sound of Thunder*. Get that wrong and a 40-track
-playlist contains the same song three times, and no amount of good popularity
-data saves it.
+- Last.fm ranks by how often songs are scrobbled, so for artists with thin
+  catalogues the top of the list can contain oddities like `Untitled` or
+  `Track 01`, which simply will not match anything.
+- Picking between multiple copies of the same song is imperfect. Last.fm does not
+  return track durations, which would be the most reliable way to tell a single
+  edit from an album version.
+- Live albums that do not announce themselves in their title cannot be detected.
+- Classical, soundtrack and compilation-heavy libraries are not handled well.
 
-`lib/HitsPlaylist/Matcher.pm` is that logic, with **no LMS and no CPAN
-dependencies** so it can be tested standalone and lifted into the plugin
-unchanged. Every rule in it names the specific song that breaks the naive
-version. Do not simplify a rule without checking its song:
-
-- Strip trailing qualifiers only, never leading ones, or `(Don't Fear) The Reaper`
-  becomes `The Reaper` and `(Antichrist Television Blues)` becomes the empty string
-- Anchor the qualifier vocabulary, or you destroy `Live and Let Die`,
-  `Radio Ga Ga` and `Video Killed the Radio Star`
-- Do not blindly prefer studio over live: the canonical `I Want You to Want Me`
-  is the *At Budokan* recording, and the same is true of `Show Me the Way` and
-  `Free Bird`
-- Never token-set fuzzy matching, which is subset-tolerant by construction and
-  lets `I Want You` swallow `I Want You Back`
-- At two tokens or fewer, demand exact equality: `Home`, `One`, `Numb` are traps
+Tested so far against one library of roughly 10,000 tracks. Reports of what
+breaks on yours are welcome in
+[Issues](https://github.com/mtxmiller/HitsPlaylist/issues).
 
 ## Development
 
 ```bash
-prove -Ilib t/                    # 43 tests, no network, no LMS, no API key
-tools/sync-matcher.sh             # regenerate the plugin's copy of the matcher
-HOST=my-server LMS_CONTAINER=lms tools/deploy.sh
+prove -Ilib t/          # 43 tests. No network, no LMS, no API key needed.
+tools/sync-matcher.sh   # after changing the matcher
+tools/deploy.sh         # install to a server (see the script for env vars)
 ```
 
-`Plugins/HitsPlaylist/Matcher.pm` is **generated** from `lib/HitsPlaylist/Matcher.pm`
-by `tools/sync-matcher.sh`, so the tested code and the shipped code cannot drift.
-`t/compile.t` enforces both the compile and the sync.
+The song matching lives in `lib/HitsPlaylist/Matcher.pm` and has no LMS or CPAN
+dependencies, so it can be tested on its own. `Plugins/HitsPlaylist/Matcher.pm`
+is generated from it — edit the copy in `lib/`.
 
-### The probe
+Matching the outside world's idea of a song to a file on your disk is most of the
+work here. A library might hold the studio cut of `Comfortably Numb`, a 2011
+remaster and a live version, and picking wrong gives you the same song three
+times. `tools/probe.pl` prints what the matcher decided for a real library so a
+human can check it.
 
-`tools/probe.pl` is not the plugin and is deliberately not plugin-shaped. It
-prints a MATCH / AMBIG / MISS table for `(artist, title)` pairs against a real
-library so a human can read it and spot wrong matches. **You are the oracle** —
-no automated test can tell you whether that is the right "I Want You to Want Me".
-
-```bash
-LMS_HOST=my-lms-server perl -Ilib tools/probe.pl --lastfm --top 30
-```
-
-Only **wrong matches** are failures. Misses are expected. AMBIG means several
-local versions collapsed to one title and one was chosen; those are the lines
-worth reading.
-
-## Verified, not assumed
-
-Checked against real sources rather than recalled:
-
-| Claim | Source |
-|---|---|
-| `tracks.titlesearch`, `contributors.namesearch` exist | slimserver `SQL/SQLite/schema_1_up.sql` (the lyrion.org reference page omits them) |
-| roles 1 Artist, 2 Composer, 3 Conductor, 4 Band, 5 Album artist, 6 Track artist | same schema |
-| `albums.compilation` is a real boolean column | same schema |
-| `registerInfoProvider` belongs in `postinitPlugin` | LastMix `Plugin.pm:38` |
-| enqueue via `playlist playtracks listRef` with plain urls | LastMix `CLI.pm:91` |
-| API key convention: `install.xml` `<id2>`, dashes stripped at runtime | LastMix `LFM.pm:22`, `LFM.pm:430` |
-| `_pluginDataFor` comes from the base class | slimserver `Slim/Plugin/Base.pm:111` |
-| `type => 'link'` may use `url => \&coderef` with `passthrough` | slimserver `Slim/Control/XMLBrowser.pm:471,494` |
-| handler signature is `($client, $cb, $args, @passthrough)` | slimserver `Slim/Control/XMLBrowser.pm:525` |
-| `is_app => 1` forces the Apps menu | slimserver `Slim/Plugin/OPMLBased.pm:23-26` |
-
-## Known limitations
-
-- **`artist.getTopTracks` returns no duration.** Duration is the strongest signal
-  for picking between several versions of a song, and it is simply not in the
-  response. Version selection currently runs on weaker signals: title
-  cleanliness, live markers, album cohesion, compilation status, then year.
-- Last.fm's ranking is scrobble-weighted, so thin catalogues return junk in the
-  top slots (`Untitled`, `Track 01`) which silently becomes a miss.
-- Live albums that do not say so anywhere (`Frampton Comes Alive!`,
-  `One More From the Road`) cannot be detected from text.
-- Classical, soundtracks and heavy compilation libraries are not handled well.
+Contributors should read [CLAUDE.md](CLAUDE.md) first: it covers the project
+rules and a number of non-obvious traps in the LMS plugin API.
 
 ## Credits
 
-The `<id2>` API key convention, the async patterns and the enqueue form were all
-learned by reading [LastMix](https://github.com/michaelherger/LastMix) and
+Built by reading [LastMix](https://github.com/michaelherger/LastMix) and
 [MusicArtistInfo](https://github.com/michaelherger/MusicArtistInfo) by Michael
-Herger. The basket exists because DynamicPlaylists4 solved the same
-multi-select problem first.
+Herger, which is where the API key convention and the asynchronous patterns come
+from. The basket exists because DynamicPlaylists4 solved the same problem first.
 
 ## License
 

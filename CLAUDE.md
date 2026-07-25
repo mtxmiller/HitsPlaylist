@@ -132,6 +132,25 @@ disagree, one of them has a bug — the probe's cache key once omitted the reque
 limit, so `--top 70` replayed a cached 10-track response and made a plugin cap
 look like a library limit.
 
+## Verified against real sources
+
+Checked rather than recalled, with where. Useful when something stops working and
+you need to know whether the assumption or the code changed.
+
+| Claim | Source |
+|---|---|
+| `tracks.titlesearch`, `contributors.namesearch` exist | slimserver `SQL/SQLite/schema_1_up.sql` — the lyrion.org database reference omits them |
+| roles 1 Artist, 2 Composer, 3 Conductor, 4 Band, 5 Album artist, 6 Track artist | same schema |
+| `albums.compilation` is a real boolean column | same schema |
+| `registerInfoProvider` belongs in `postinitPlugin`, not `initPlugin` | LastMix `Plugin.pm:38` |
+| enqueue via `playlist playtracks listRef` with plain urls | LastMix `CLI.pm:91` |
+| API key convention: `install.xml` `<id2>`, dashes stripped at runtime | LastMix `LFM.pm:22`, `LFM.pm:430` |
+| `_pluginDataFor` comes from the base class | slimserver `Slim/Plugin/Base.pm:111` |
+| `type => 'link'` may use `url => \&coderef` with `passthrough` | slimserver `Slim/Control/XMLBrowser.pm:471,494` |
+| handler signature is `($client, $cb, $args, @passthrough)` | slimserver `Slim/Control/XMLBrowser.pm:525` |
+| `is_app => 1` forces the Apps menu | slimserver `Slim/Plugin/OPMLBased.pm:23-26` |
+| the release zip needs a top-level `HitsPlaylist/` directory | MobileTranscode-1.3.0.zip |
+
 ## Publishing
 
 `repo.xml` points at a GitHub release asset. To cut one:
