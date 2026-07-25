@@ -38,11 +38,20 @@ use Plugins::HitsPlaylist::Matcher qw(dedupe_hits match_title choose_version is_
 # Ask for more than we need. Strict mode skips anything not owned, so a top-40
 # request routinely yields far fewer, and the deeper ranks are what fill a
 # playlist for an artist whose biggest hits happen to be missing.
-use constant LASTFM_LIMIT   => 30;   # top tracks requested per artist
+use constant LASTFM_LIMIT   => 50;   # top tracks requested per artist. Must exceed
+                                     # MAX_PLAYLIST or a single artist can never
+                                     # fill a playlist on its own.
 use constant SIMILAR_LIMIT  => 30;   # similar artists requested from Last.fm
 use constant MAX_ARTISTS    => 12;   # owned artists to build from, similar-expansion
 use constant BASKET_MAX_ARTISTS => 25;  # basket is explicit, so allow a bigger set
-use constant PER_ARTIST_MAX => 6;    # ceiling per artist before interleaving
+# NOTE: there is deliberately no per-artist ceiling.
+#
+# There used to be one (6), and it was a mistake. Round-robin already guarantees
+# fairness by construction: it takes every artist's biggest hit before anyone's
+# second. An artist can only dominate once the others have run out of tracks, and
+# at that point filling the playlist is exactly what you want. The extra cap did
+# nothing for balance and silently truncated instead: a 5-artist basket produced
+# 5 x 6 = 30 tracks and never reached the 40 target.
 use constant MAX_PLAYLIST   => 40;
 
 my $log = Slim::Utils::Log->addLogCategory({
@@ -343,10 +352,9 @@ sub _fetchHitsSerially {
     my @byArtist;
     my @noHitsOwned;
 
-    # PER_ARTIST_MAX exists to stop one artist dominating an interleaved mix.
-    # With a single artist there is nothing to dominate, and capping at 6 makes
-    # "Hits" for a well-represented artist look broken. Let it fill the playlist.
-    my $perArtist = (scalar @$artists == 1) ? MAX_PLAYLIST : PER_ARTIST_MAX;
+    # Any one artist may supply the whole playlist if the others cannot. The
+    # round-robin below decides the actual balance.
+    my $perArtist = MAX_PLAYLIST;
 
     my $next;
     $next = sub {
@@ -392,7 +400,7 @@ sub _fetchHitsSerially {
 sub _matchArtist {
     my ($artist, $hits, $max) = @_;
 
-    $max ||= PER_ARTIST_MAX;
+    $max ||= MAX_PLAYLIST;
 
     return [] unless $hits && @$hits;
 
