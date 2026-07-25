@@ -18,7 +18,7 @@ use Exporter 'import';
 
 our @EXPORT_OK = qw(
     normalize_title normalize_artist bare_title
-    is_live_title similarity
+    is_live_title is_live_album similarity
     match_title choose_version
 );
 
@@ -79,12 +79,32 @@ my $QUALIFIER_RE = do {
 # Deliberately not used to reject: the live cut is the canonical hit for
 # Cheap Trick "I Want You to Want Me", Frampton "Show Me the Way",
 # Kiss "Rock and Roll All Nite", Skynyrd "Free Bird".
-my $LIVE_RE = qr/\b(?:live(?:\s+(?:at|from|in|on|@)\b)?|unplugged|concert|in\s+concert)\b/i;
+my $LIVE_WORD = qr/(?:live|unplugged|in\s+concert)/i;
 
+# TITLES: only a live marker in QUALIFIER POSITION counts, i.e. inside a trailing
+# bracketed group or after a " - " suffix. A bare \blive\b anywhere is the same
+# substring trap the qualifier vocabulary exists to avoid, and it misfires on
+# "Live and Let Die", "Live Forever" (Oasis), "Live Wire" (AC/DC).
 sub is_live_title {
     my ($title) = @_;
-    return 0 unless defined $title;
-    return $title =~ $LIVE_RE ? 1 : 0;
+    return 0 unless defined $title && length $title;
+    my $s = _ascii_punct($title);
+    return 1 if $s =~ /[\(\[][^\)\]]*\b$LIVE_WORD\b[^\)\]]*[\)\]]/;
+    return 1 if $s =~ /\s+-\s+[^-]*\b$LIVE_WORD\b/;
+    return 0;
+}
+
+# ALBUMS: looser, because live albums rarely mark themselves in qualifier
+# position. "Live at Leeds", "Frampton Comes Alive!", "MTV Unplugged" all carry
+# the word as free text.
+#
+# Known false positives, accepted: "Live Through This" (Hole), "Stay Alive".
+# The cost of a false positive is only a -200 version-selection penalty, never a
+# rejection, so a wrong call here degrades a tie-break rather than losing a track.
+sub is_live_album {
+    my ($album) = @_;
+    return 0 unless defined $album && length $album;
+    return _ascii_punct($album) =~ /\b$LIVE_WORD\b/ ? 1 : 0;
 }
 
 # ---------------------------------------------------------------------------

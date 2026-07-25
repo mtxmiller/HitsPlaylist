@@ -24,7 +24,7 @@ use JSON::PP;
 use HTTP::Tiny;
 use Getopt::Long;
 use FindBin;
-use HitsPlaylist::Matcher qw(normalize_title normalize_artist bare_title is_live_title match_title choose_version);
+use HitsPlaylist::Matcher qw(normalize_title normalize_artist bare_title is_live_title is_live_album match_title choose_version);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
@@ -129,7 +129,7 @@ sub tracks_for_artist {
             duration => $t->{duration},
             norm     => normalize_title($t->{title}),
             stripped => (bare_title($t->{title}) ne normalize_title($t->{title})) ? 1 : 0,
-            live     => (is_live_title($t->{title}) || is_live_title($t->{album} // '')) ? 1 : 0,
+            live     => (is_live_title($t->{title}) || is_live_album($t->{album} // '')) ? 1 : 0,
         };
     }
     return \@out;
