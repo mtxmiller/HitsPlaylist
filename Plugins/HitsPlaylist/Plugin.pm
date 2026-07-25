@@ -56,7 +56,10 @@ sub initPlugin {
     Plugins::HitsPlaylist::LFM->aid( $class->_pluginDataFor('id2') );
 
     Slim::Control::Request::addDispatch(
-        ['hitsplaylist', 'playsave'], [1, 0, 1, \&_cliPlaySave]
+        ['hitsplaylist', 'play'], [1, 0, 1, \&_cliPlay]
+    );
+    Slim::Control::Request::addDispatch(
+        ['hitsplaylist', 'playsave'], [1, 0, 1, \&_cliPlay]
     );
 
     $class->SUPER::initPlugin(@_);
@@ -282,20 +285,32 @@ sub _buildFeed {
         # so anything set there is silently discarded. This row is the only place
         # the strict-mode outcome can actually be surfaced, and it matters: a
         # 12-track result should read as "you own 12 of these", not as a bug.
-        unshift @items, {
-            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE')
-                         . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
-            type        => 'link',
-            url         => \&playAndSave,
-            passthrough => [ { artist => $seed } ],
-            nextWindow  => 'nowPlaying',
-        };
+        # Play all comes first: saving is the occasional case, not the default.
+        # Every run saving a playlist would silt up the playlist menu fast.
+        unshift @items,
+            {
+                name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_ALL')
+                             . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
+                type        => 'link',
+                url         => \&playHits,
+                passthrough => [ { artist => $seed, save => 0 } ],
+                nextWindow  => 'nowPlaying',
+            },
+            {
+                name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
+                type        => 'link',
+                url         => \&playHits,
+                passthrough => [ { artist => $seed, save => 1 } ],
+                nextWindow  => 'nowPlaying',
+            };
     }
 
     $cb->({ items => \@items });
 }
 
-sub playAndSave {
+# One handler for both rows. $pt->{save} decides whether the queue is also
+# written out as a named playlist.
+sub playHits {
     my ( $client, $cb, $args, $pt ) = @_;
 
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_PLAYER') ] })
@@ -307,9 +322,19 @@ sub playAndSave {
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] })
         unless @$urls;
 
-    my $name = _playlistName($data->{artist});
-
     $client->execute([ 'playlist', 'playtracks', 'listRef', $urls ]);
+
+    if ( !$pt->{save} ) {
+        return $cb->({
+            items => [ {
+                type => 'text',
+                name => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAYING'),
+            } ],
+            nextWindow => 'nowPlaying',
+        });
+    }
+
+    my $name = _playlistName($data->{artist});
     $client->execute([ 'playlist', 'save', $name ]);
 
     $cb->({
@@ -322,7 +347,7 @@ sub playAndSave {
 }
 
 # Same surface, driven from a control app or a script instead of a menu.
-sub _cliPlaySave {
+sub _cliPlay {
     my $request = shift;
 
     my $client = $request->client;
@@ -330,7 +355,7 @@ sub _cliPlaySave {
         $request->setStatusNeedsClient();
         return;
     }
-    if ( $request->isNotCommand([['hitsplaylist'], ['playsave']]) ) {
+    if ( $request->isNotCommand([['hitsplaylist'], ['play', 'playsave']]) ) {
         $request->setStatusBadDispatch();
         return;
     }
@@ -344,12 +369,16 @@ sub _cliPlaySave {
         return;
     }
 
-    my $name = _playlistName($data->{artist});
     $client->execute([ 'playlist', 'playtracks', 'listRef', $urls ]);
-    $client->execute([ 'playlist', 'save', $name ]);
-
-    $request->addResult('playlist', $name);
     $request->addResult('count', scalar @$urls);
+
+    # Which verb was dispatched decides whether we also save.
+    if ( $request->getRequest(1) eq 'playsave' ) {
+        my $name = _playlistName($data->{artist});
+        $client->execute([ 'playlist', 'save', $name ]);
+        $request->addResult('playlist', $name);
+    }
+
     $request->setStatusDone();
 }
 
