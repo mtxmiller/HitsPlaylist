@@ -35,15 +35,32 @@ use Plugins::HitsPlaylist::LFM;
 use Plugins::HitsPlaylist::Library;
 use Plugins::HitsPlaylist::Matcher qw(dedupe_hits match_title choose_version is_live_title);
 
+my $log = Slim::Utils::Log->addLogCategory({
+    category     => 'plugin.hitsplaylist',
+    defaultLevel => 'ERROR',
+    description  => 'PLUGIN_HITSPLAYLIST_NAME',
+});
+
+my $prefs = preferences('plugin.hitsplaylist');
+
 # Ask for more than we need. Strict mode skips anything not owned, so a top-40
 # request routinely yields far fewer, and the deeper ranks are what fill a
 # playlist for an artist whose biggest hits happen to be missing.
-use constant LASTFM_LIMIT   => 50;   # top tracks requested per artist. Must exceed
-                                     # MAX_PLAYLIST or a single artist can never
-                                     # fill a playlist on its own.
-use constant SIMILAR_LIMIT  => 30;   # similar artists requested from Last.fm
-use constant MAX_ARTISTS    => 12;   # owned artists to build from, similar-expansion
+use constant SIMILAR_LIMIT      => 30;  # similar artists requested from Last.fm
 use constant BASKET_MAX_ARTISTS => 25;  # basket is explicit, so allow a bigger set
+
+# These three were constants until three of my guesses turned out wrong on a
+# real library within an hour. They are prefs now, with the old values as
+# defaults.
+sub MAX_PLAYLIST { $prefs->get('playlistLength') || 40 }
+sub MAX_ARTISTS  { $prefs->get('similarArtists') || 12 }
+
+# Must exceed the playlist length or a single artist can never fill a playlist
+# on its own. That is exactly what pinned artist-only Mt. Joy at 30.
+sub LASTFM_LIMIT {
+    my $n = MAX_PLAYLIST() + 10;
+    return $n > 50 ? $n : 50;
+}
 # NOTE: there is deliberately no per-artist ceiling.
 #
 # There used to be one (6), and it was a mistake. Round-robin already guarantees
@@ -52,15 +69,19 @@ use constant BASKET_MAX_ARTISTS => 25;  # basket is explicit, so allow a bigger 
 # at that point filling the playlist is exactly what you want. The extra cap did
 # nothing for balance and silently truncated instead: a 5-artist basket produced
 # 5 x 6 = 30 tracks and never reached the 40 target.
-use constant MAX_PLAYLIST   => 40;
 
-my $log = Slim::Utils::Log->addLogCategory({
-    category     => 'plugin.hitsplaylist',
-    defaultLevel => 'ERROR',
-    description  => 'PLUGIN_HITSPLAYLIST_NAME',
+$prefs->init({
+    playlistLength    => 40,
+    similarArtists    => 12,
+    preferCompilation => 1,   # matches the behaviour shipped before this was a choice
+    apikey            => '',
+    basket            => [],
 });
 
-my $prefs = preferences('plugin.hitsplaylist');
+# Bad values here produce a silently empty or absurd playlist rather than an
+# error, so reject them at the door.
+$prefs->setValidate({ validator => 'intlimit', low => 5,  high => 500 }, 'playlistLength');
+$prefs->setValidate({ validator => 'intlimit', low => 1,  high => 30  }, 'similarArtists');
 
 sub initPlugin {
     my $class = shift;
@@ -82,6 +103,11 @@ sub initPlugin {
     # whenever is_app is set (OPMLBased.pm:23-26) and Apps is the streaming
     # service shelf. This plugin never leaves the local library, so it belongs
     # next to Artists / Albums / Playlists where someone would look for it.
+    if (main::WEBUI) {
+        require Plugins::HitsPlaylist::Settings;
+        Plugins::HitsPlaylist::Settings->new();
+    }
+
     $class->SUPER::initPlugin(
         feed   => \&topLevelFeed,
         tag    => 'hitsplaylist',
@@ -277,12 +303,12 @@ sub expandFeed {
             my $similar = shift || [];
             # Only the seed is explicit; the similar artists are suggestions.
             _buildFromNames($client, $cb, $seed,
-                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS, undef, 1);
+                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS(), undef, 1);
         },
         sub {
             my $err = shift;
             $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
-            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS, undef, 1);
+            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS(), undef, 1);
         },
         $seed,
         SIMILAR_LIMIT,
@@ -307,7 +333,7 @@ sub _buildFromNames {
     # buries the one line that was actually informative.
     $explicitCount = scalar @$names unless defined $explicitCount;
 
-    $max ||= MAX_ARTISTS;
+    $max ||= MAX_ARTISTS();
 
     my @resolved;
     my @notInLibrary;
@@ -354,7 +380,7 @@ sub _fetchHitsSerially {
 
     # Any one artist may supply the whole playlist if the others cannot. The
     # round-robin below decides the actual balance.
-    my $perArtist = MAX_PLAYLIST;
+    my $perArtist = MAX_PLAYLIST();
 
     my $next;
     $next = sub {
@@ -389,7 +415,7 @@ sub _fetchHitsSerially {
                 $collect->([]);
             },
             $artist->{name},
-            LASTFM_LIMIT,
+            LASTFM_LIMIT(),
         );
     };
 
@@ -400,7 +426,7 @@ sub _fetchHitsSerially {
 sub _matchArtist {
     my ($artist, $hits, $max) = @_;
 
-    $max ||= MAX_PLAYLIST;
+    $max ||= MAX_PLAYLIST();
 
     return [] unless $hits && @$hits;
 
@@ -419,8 +445,9 @@ sub _matchArtist {
         next if $status eq 'MISS';              # strict: not owned, skip it
 
         my $track = choose_version($cands,
-            preferred_albums => \%preferred_albums,
-            ref_live         => is_live_title($title),
+            preferred_albums   => \%preferred_albums,
+            ref_live           => is_live_title($title),
+            prefer_compilation => $prefs->get('preferCompilation') ? 1 : 0,
         );
         next unless $track;
         next if $used{ $track->{id} }++;
@@ -446,7 +473,7 @@ sub _buildFeed {
     my (@urls, @items, %usedTrack);
     my $round = 0;
 
-    ROUND: while ( @urls < MAX_PLAYLIST ) {
+    ROUND: while ( @urls < MAX_PLAYLIST() ) {
         my $addedThisRound = 0;
 
         for my $entry (@$byArtist) {
@@ -467,7 +494,7 @@ sub _buildFeed {
             };
             $addedThisRound++;
 
-            last ROUND if @urls >= MAX_PLAYLIST;
+            last ROUND if @urls >= MAX_PLAYLIST();
         }
 
         last unless $addedThisRound;

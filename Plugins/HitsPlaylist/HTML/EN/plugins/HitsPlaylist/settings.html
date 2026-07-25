@@ -1,0 +1,26 @@
+[% PROCESS settings/header.html %]
+
+	[% WRAPPER settingSection %]
+
+		[% WRAPPER settingGroup title="PLUGIN_HITSPLAYLIST_SET_LENGTH" desc="PLUGIN_HITSPLAYLIST_SET_LENGTH_DESC" %]
+			<input type="text" class="stdedit" size="5" name="pref_playlistLength" id="pref_playlistLength" value="[% prefs.pref_playlistLength %]" />
+		[% END %]
+
+		[% WRAPPER settingGroup title="PLUGIN_HITSPLAYLIST_SET_SIMILAR" desc="PLUGIN_HITSPLAYLIST_SET_SIMILAR_DESC" %]
+			<input type="text" class="stdedit" size="5" name="pref_similarArtists" id="pref_similarArtists" value="[% prefs.pref_similarArtists %]" />
+		[% END %]
+
+		[% WRAPPER settingGroup title="PLUGIN_HITSPLAYLIST_SET_VERSION" desc="PLUGIN_HITSPLAYLIST_SET_VERSION_DESC" %]
+			<select class="stdedit" name="pref_preferCompilation" id="pref_preferCompilation">
+				<option [% IF !prefs.pref_preferCompilation %]selected [% END %]value="0">[% "PLUGIN_HITSPLAYLIST_SET_VERSION_STUDIO" | string %]</option>
+				<option [% IF prefs.pref_preferCompilation %]selected [% END %]value="1">[% "PLUGIN_HITSPLAYLIST_SET_VERSION_HITS" | string %]</option>
+			</select>
+		[% END %]
+
+		[% WRAPPER settingGroup title="PLUGIN_HITSPLAYLIST_SET_APIKEY" desc="PLUGIN_HITSPLAYLIST_SET_APIKEY_DESC" %]
+			<input type="text" class="stdedit" size="40" name="pref_apikey" id="pref_apikey" value="[% prefs.pref_apikey %]" />
+		[% END %]
+
+	[% END %]
+
+[% PROCESS settings/footer.html %]

@@ -374,8 +374,13 @@ sub choose_version {
         # 3. An album that already supplied other hits by this artist.
         $s += 150 * ($preferred->{ $c->{album_id} // '' } || 0);
 
-        # 4. Non-compilation.
-        $s -= 100 if _looks_like_compilation($c->{album});
+        # 4. Compilation handling, and which way this points is a taste call.
+        #    For a HITS playlist a greatest-hits record is arguably the right
+        #    source: consistent mastering across the whole playlist. For general
+        #    listening the original studio album usually wins. Caller decides.
+        if ( _looks_like_compilation($c->{album}) ) {
+            $s += $opt{prefer_compilation} ? 100 : -100;
+        }
 
         # 5. Year, weakest signal, and only when it is not obviously junk.
         if ($c->{year} && $c->{year} > 1900) {

@@ -51,12 +51,17 @@ sub api_key_available {
     return $ok ? 1 : 0;
 }
 
+# The limit MUST be part of the key. It was not, and `--top 70` silently
+# returned a cached 10-track response, which made a plugin cap look like a
+# library limit. The plugin's own LFM.pm always keyed on all params; this file
+# did not, and the two disagreed exactly when it mattered.
 sub _cache_path {
-    my ($method, $artist) = @_;
+    my ($method, $artist, $limit) = @_;
     my $slug = lc $artist;
     $slug =~ s/[^a-z0-9]+/_/g;
     $slug =~ s/\A_+|_+\z//g;
     $slug = substr($slug, 0, 80);
+    $slug .= '-' . $limit if $limit;
     return "$CACHE_DIR/$method-$slug.json";
 }
 
@@ -65,7 +70,7 @@ sub _cache_path {
 sub _get {
     my ($method, $artist, %params) = @_;
 
-    my $path = _cache_path($method, $artist);
+    my $path = _cache_path($method, $artist, $params{limit});
     if (open my $fh, '<:encoding(UTF-8)', $path) {
         local $/;
         my $raw = <$fh>;

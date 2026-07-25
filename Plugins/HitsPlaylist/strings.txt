@@ -78,3 +78,36 @@ PLUGIN_HITSPLAYLIST_EXPAND
 
 PLUGIN_HITSPLAYLIST_NOT_OWNED
 	EN	Not in your library
+
+PLUGIN_HITSPLAYLIST_SET_LENGTH
+	EN	Playlist length
+
+PLUGIN_HITSPLAYLIST_SET_LENGTH_DESC
+	EN	How many tracks a generated playlist should aim for. Strict matching means you may get fewer if you do not own enough of the hits.
+
+PLUGIN_HITSPLAYLIST_SET_SIMILAR
+	EN	Similar artists to include
+
+PLUGIN_HITSPLAYLIST_SET_SIMILAR_DESC
+	EN	How many similar artists "Expand with similar artists" pulls in, counting only ones already in your library. Each one costs a Last.fm lookup the first time.
+
+PLUGIN_HITSPLAYLIST_SET_VERSION
+	EN	When you own several versions of a song
+
+PLUGIN_HITSPLAYLIST_SET_VERSION_DESC
+	EN	Which copy to pick when the same song appears on more than one album. Greatest hits gives a playlist consistent mastering; the studio album is usually the original recording.
+
+PLUGIN_HITSPLAYLIST_SET_VERSION_STUDIO
+	EN	Prefer the original studio album
+
+PLUGIN_HITSPLAYLIST_SET_VERSION_HITS
+	EN	Prefer a greatest hits album
+
+PLUGIN_HITSPLAYLIST_SET_APIKEY
+	EN	Last.fm API key (optional)
+
+PLUGIN_HITSPLAYLIST_SET_APIKEY_DESC
+	EN	Leave blank to use the key built into the plugin. Supply your own from last.fm/api/account/create if you would rather not share the built-in one.
+
+PLUGIN_HITSPLAYLIST_BAD_KEY
+	EN	That does not look like a Last.fm API key. It should be 32 hexadecimal characters. Ignored.

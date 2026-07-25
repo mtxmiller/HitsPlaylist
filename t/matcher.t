@@ -174,6 +174,22 @@ subtest 'duration outranks year' => sub {
     is choose_version(\@c, ref_duration => 540)->{id}, 2, 'duration window wins';
 };
 
+subtest 'compilation preference is caller-controlled' => sub {
+    # A taste call, not a correctness one. For a HITS playlist a greatest-hits
+    # record gives consistent mastering across the playlist; for general
+    # listening the original studio album is usually wanted. Both must work.
+    my @c = (
+        cand(id => 1, title => 'Song', album => 'Greatest Hits', year => 1995),
+        cand(id => 2, title => 'Song', album => 'Some Album',    year => 1979),
+    );
+    is choose_version(\@c, prefer_compilation => 1)->{album}, 'Greatest Hits',
+        'greatest hits when asked for';
+    is choose_version(\@c, prefer_compilation => 0)->{album}, 'Some Album',
+        'studio album when asked for';
+    is choose_version(\@c)->{album}, 'Some Album',
+        'defaults to the studio album when the caller says nothing';
+};
+
 subtest 'junk years do not win' => sub {
     # Budget compilations tag year 0 or 1900, which would sort first on year.
     my @c = (
