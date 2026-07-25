@@ -230,7 +230,8 @@ sub basketFeed {
 
     # No similar-artist expansion here: the basket is an explicit choice and
     # padding it with artists the user did not pick would defeat the point.
-    _buildFromNames($client, $cb, 'Basket', $basket, BASKET_MAX_ARTISTS);
+    # Every basket entry is explicit, so every miss is worth reporting.
+    _buildFromNames($client, $cb, 'Basket', $basket, BASKET_MAX_ARTISTS, undef, scalar @$basket);
 }
 
 # Artist only. One API call.
@@ -247,7 +248,7 @@ sub hitsFeed {
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] })
         unless $seed;
 
-    _buildFromNames($client, $cb, $seed, [ $seed ], 1, $seed);
+    _buildFromNames($client, $cb, $seed, [ $seed ], 1, $seed, 1);
 }
 
 # Reached from the "Expand with similar artists" row inside an artist's hits.
@@ -265,13 +266,14 @@ sub expandFeed {
     Plugins::HitsPlaylist::LFM->similarArtists(
         sub {
             my $similar = shift || [];
+            # Only the seed is explicit; the similar artists are suggestions.
             _buildFromNames($client, $cb, $seed,
-                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS);
+                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS, undef, 1);
         },
         sub {
             my $err = shift;
             $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
-            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS);
+            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS, undef, 1);
         },
         $seed,
         SIMILAR_LIMIT,
@@ -285,7 +287,16 @@ sub expandFeed {
 # network round trip. Discarding unowned artists before fetching anybody's hits
 # turns ~30 API calls into ~12 on a typical library.
 sub _buildFromNames {
-    my ($client, $cb, $label, $names, $max, $expandSeed) = @_;
+    my ($client, $cb, $label, $names, $max, $expandSeed, $explicitCount) = @_;
+
+    # The first $explicitCount names are ones the user actually chose: a seed
+    # artist, or basket entries. Anything after that is a Last.fm suggestion.
+    #
+    # The difference matters for reporting. "You added Springsteen and he is not
+    # in your library" is worth saying. "Last.fm suggested 26 artists you do not
+    # own" is not - that is simply what expansion looks like, and listing them
+    # buries the one line that was actually informative.
+    $explicitCount = scalar @$names unless defined $explicitCount;
 
     $max ||= MAX_ARTISTS;
 
@@ -293,16 +304,19 @@ sub _buildFromNames {
     my @notInLibrary;
     my %seen;
 
-    # Order is preserved, so for Hits Radio the seed artist leads and its hits
-    # land first in every round.
+    # Order is preserved, so the seed or the basket leads and its hits land
+    # first in every round.
+    my $idx = -1;
     for my $name (@$names) {
+        $idx++;
         last if @resolved >= $max;
         next unless defined $name && length $name;
         next if $seen{ lc $name }++;
 
         my $contributor = Plugins::HitsPlaylist::Library->find_contributor($name);
         if ( !$contributor ) {
-            push @notInLibrary, $name;
+            # Only report a miss the user could have expected to matter.
+            push @notInLibrary, $name if $idx < $explicitCount;
             next;
         }
 
@@ -531,13 +545,24 @@ sub _buildFeed {
     # that silently becomes a miss; the user cannot otherwise tell "I don't own
     # it" from "the matcher failed".
     $skipped ||= {};
-    my @absent = ( @{ $skipped->{missing} || [] }, @{ $skipped->{noHits} || [] } );
 
-    if (@absent) {
+    # Artists you explicitly asked for that are not in the library at all.
+    if ( my @missing = @{ $skipped->{missing} || [] } ) {
+        push @items, {
+            type => 'text',
+            name => cstring($client, 'PLUGIN_HITSPLAYLIST_NOT_OWNED')
+                  . ': ' . join(', ', @missing),
+        };
+    }
+
+    # In the library, but nothing matched. Bounded by the artist cap, and the
+    # more interesting of the two: it can mean a thin catalogue OR a matcher
+    # miss, and those are worth being able to tell apart.
+    if ( my @noHits = @{ $skipped->{noHits} || [] } ) {
         push @items, {
             type => 'text',
             name => cstring($client, 'PLUGIN_HITSPLAYLIST_NO_HITS_OWNED')
-                  . ': ' . join(', ', @absent),
+                  . ': ' . join(', ', @noHits),
         };
     }
 
