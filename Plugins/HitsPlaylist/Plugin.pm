@@ -1,27 +1,30 @@
 package Plugins::HitsPlaylist::Plugin;
 
-# HitsPlaylist v0.1.0 - minimum viable plugin.
+# HitsPlaylist v0.3.0
 #
-# Scope is deliberately one menu item: Artist > Hits Radio. No basket, no
-# multi-select, no ListenBrainz fallback, no settings beyond an optional API key
-# override. The risk in this project was always the matcher, which is now
-# validated against 185 real tracks; everything here is plumbing around it.
+# Two entry points, one shared pipeline:
 #
-# Flow:
-#   Artist > Hits Radio
-#     -> Last.fm artist.getTopTracks        (async, cached 30 days)
-#     -> dedupe the incoming list           (the API repeats songs)
-#     -> match each title to a local track  (Matcher.pm)
-#     -> show the resolved list, inspectable, with play + save at the top
+#   Artist > Hits Radio          seed artist + Last.fm similar artists
+#   Artist > Add to Hits Basket  accumulate artists while browsing normally
+#   My Music > Hits Playlist     build from whatever is in the basket
 #
-# The list is shown rather than played blind on purpose. The whole premise of
+# Both converge on _buildFromNames: resolve names to local contributors, fetch
+# each one's hits, match against the library, interleave by rank.
+#
+# The basket exists because a true multi-select widget in LMS is miserable
+# across web / Material / iPeng / hardware. DynamicPlaylists4 hit the same wall
+# and solved it the same way. It stores its preselection in per-client
+# pluginData; this uses server prefs instead, so the basket survives a restart
+# and works while browsing with no player selected.
+#
+# The resolved list is shown rather than played blind on purpose. The premise of
 # this plugin is that you end up holding an object you can look at, which is the
 # thing Don't Stop The Music never gives you.
 
 use strict;
 use warnings;
 
-use base qw(Slim::Plugin::Base);
+use base qw(Slim::Plugin::OPMLBased);
 
 use Slim::Menu::ArtistInfo;
 use Slim::Utils::Log;
@@ -37,7 +40,8 @@ use Plugins::HitsPlaylist::Matcher qw(dedupe_hits match_title choose_version is_
 # playlist for an artist whose biggest hits happen to be missing.
 use constant LASTFM_LIMIT   => 30;   # top tracks requested per artist
 use constant SIMILAR_LIMIT  => 30;   # similar artists requested from Last.fm
-use constant MAX_ARTISTS    => 12;   # owned artists to actually build from
+use constant MAX_ARTISTS    => 12;   # owned artists to build from, similar-expansion
+use constant BASKET_MAX_ARTISTS => 25;  # basket is explicit, so allow a bigger set
 use constant PER_ARTIST_MAX => 6;    # ceiling per artist before interleaving
 use constant MAX_PLAYLIST   => 40;
 
@@ -65,7 +69,40 @@ sub initPlugin {
         ['hitsplaylist', 'playsave'], [1, 0, 1, \&_cliPlay]
     );
 
-    $class->SUPER::initPlugin(@_);
+    # menu => 'myMusic' rather than is_app => 1. OPMLBased forces menu='apps'
+    # whenever is_app is set (OPMLBased.pm:23-26) and Apps is the streaming
+    # service shelf. This plugin never leaves the local library, so it belongs
+    # next to Artists / Albums / Playlists where someone would look for it.
+    $class->SUPER::initPlugin(
+        feed   => \&topLevelFeed,
+        tag    => 'hitsplaylist',
+        menu   => 'myMusic',
+        weight => 80,
+    );
+}
+
+# ---------------------------------------------------------------------------
+# The basket
+#
+# Stored in server prefs as a plain list of artist NAMES, not contributor ids.
+# Ids are reassigned by a full rescan; names survive it, and the name is what
+# Last.fm needs anyway.
+# ---------------------------------------------------------------------------
+
+sub _basket {
+    my $b = $prefs->get('basket');
+    return (ref $b eq 'ARRAY') ? $b : [];
+}
+
+sub _basketSet {
+    my ($list) = @_;
+    $prefs->set('basket', $list);
+    return $list;
+}
+
+sub _basketHas {
+    my ($name) = @_;
+    return scalar grep { lc $_ eq lc $name } @{ _basket() };
 }
 
 # Menu registration goes in postinitPlugin, not initPlugin: info providers are
@@ -88,12 +125,112 @@ sub artistInfoMenu {
             || (ref $remoteMeta && $remoteMeta->{artist})
             || return;
 
-    return [ {
-        name        => cstring($client, 'PLUGIN_HITSPLAYLIST_HITS_RADIO'),
+    my $inBasket = _basketHas($name);
+
+    return [
+        {
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_HITS_RADIO'),
+            type        => 'link',
+            url         => \&hitsFeed,
+            passthrough => [ { artist => $name } ],
+        },
+        {
+            # The label flips so the same row both adds and removes, which is
+            # how you avoid two near-identical entries in an already busy menu.
+            name        => $inBasket
+                         ? cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_REMOVE')
+                         : cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_ADD'),
+            type        => 'link',
+            url         => \&basketToggle,
+            passthrough => [ { artist => $name } ],
+        },
+    ];
+}
+
+sub basketToggle {
+    my ( $client, $cb, $args, $pt ) = @_;
+
+    my $name = $pt->{artist} or
+        return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] });
+
+    my $basket = _basket();
+
+    if ( _basketHas($name) ) {
+        _basketSet([ grep { lc $_ ne lc $name } @$basket ]);
+        return $cb->({ items => [ {
+            type => 'text',
+            name => sprintf('%s (%d)', cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_REMOVED'), scalar @{ _basket() }),
+        } ] });
+    }
+
+    _basketSet([ @$basket, $name ]);
+    $cb->({ items => [ {
+        type => 'text',
+        name => sprintf('%s (%d)', cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_ADDED'), scalar @{ _basket() }),
+    } ] });
+}
+
+# My Music > Hits Playlist
+sub topLevelFeed {
+    my ( $client, $cb, $args ) = @_;
+
+    my $basket = _basket();
+
+    if ( !@$basket ) {
+        return $cb->({ items => [ {
+            type => 'text',
+            name => cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_EMPTY'),
+        } ] });
+    }
+
+    my @items = (
+        {
+            name        => sprintf('%s (%d)', cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_BUILD'), scalar @$basket),
+            type        => 'link',
+            url         => \&basketFeed,
+            passthrough => [ {} ],
+        },
+        {
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_CLEAR'),
+            type        => 'link',
+            url         => \&basketClear,
+            passthrough => [ {} ],
+        },
+    );
+
+    # Show what is actually in the basket. Tapping one removes it, so the list
+    # doubles as the edit surface and needs no separate management screen.
+    push @items, map { {
+        name        => $_,
         type        => 'link',
-        url         => \&hitsFeed,
-        passthrough => [ { artist => $name } ],
-    } ];
+        url         => \&basketToggle,
+        passthrough => [ { artist => $_ } ],
+    } } @$basket;
+
+    $cb->({ items => \@items });
+}
+
+sub basketClear {
+    my ( $client, $cb ) = @_;
+    _basketSet([]);
+    $cb->({ items => [ {
+        type => 'text',
+        name => cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_CLEARED'),
+    } ] });
+}
+
+sub basketFeed {
+    my ( $client, $cb, $args, $pt ) = @_;
+
+    my $basket = _basket();
+    return $cb->({ items => [ {
+        type => 'text',
+        name => cstring($client, 'PLUGIN_HITSPLAYLIST_BASKET_EMPTY'),
+    } ] }) unless @$basket;
+
+    # No similar-artist expansion here: the basket is an explicit choice and
+    # padding it with artists the user did not pick would defeat the point.
+    _buildFromNames($client, $cb, 'Basket', $basket, BASKET_MAX_ARTISTS);
 }
 
 sub hitsFeed {
@@ -111,33 +248,48 @@ sub hitsFeed {
     Plugins::HitsPlaylist::LFM->similarArtists(
         sub {
             my $similar = shift || [];
-            _resolveArtists($client, $cb, $seed, [ map { $_->{name} } @$similar ]);
+            _buildFromNames($client, $cb, $seed,
+                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS);
         },
         sub {
             # No similar-artist data is not fatal: fall back to the seed alone,
             # which is exactly the v0.1 behaviour.
             my $err = shift;
             $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
-            _resolveArtists($client, $cb, $seed, []);
+            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS);
         },
         $seed,
         SIMILAR_LIMIT,
     );
 }
 
-sub _resolveArtists {
-    my ($client, $cb, $seed, $similarNames) = @_;
+# Both entry points land here. Names in, playlist out.
+#
+# Resolving against the library FIRST is the optimisation that makes expansion
+# cheap: find_contributor is a local indexed lookup, artist.gettoptracks is a
+# network round trip. Discarding unowned artists before fetching anybody's hits
+# turns ~30 API calls into ~12 on a typical library.
+sub _buildFromNames {
+    my ($client, $cb, $label, $names, $max) = @_;
+
+    $max ||= MAX_ARTISTS;
 
     my @resolved;
+    my @notInLibrary;
     my %seen;
 
-    # Seed artist always leads, so its hits land first in every round.
-    for my $name ($seed, @$similarNames) {
-        last if @resolved >= MAX_ARTISTS;
+    # Order is preserved, so for Hits Radio the seed artist leads and its hits
+    # land first in every round.
+    for my $name (@$names) {
+        last if @resolved >= $max;
+        next unless defined $name && length $name;
         next if $seen{ lc $name }++;
 
         my $contributor = Plugins::HitsPlaylist::Library->find_contributor($name);
-        next unless $contributor;
+        if ( !$contributor ) {
+            push @notInLibrary, $name;
+            next;
+        }
 
         push @resolved, { name => $name, contributor => $contributor };
     }
@@ -146,7 +298,7 @@ sub _resolveArtists {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NOT_IN_LIBRARY') ] });
     }
 
-    _fetchHitsSerially($client, $cb, $seed, \@resolved);
+    _fetchHitsSerially($client, $cb, $label, \@resolved, \@notInLibrary);
 }
 
 # One artist at a time, not a fan-out.
@@ -156,10 +308,11 @@ sub _resolveArtists {
 # slower only on a cold cache; once warm every call returns synchronously and
 # the whole loop is instant.
 sub _fetchHitsSerially {
-    my ($client, $cb, $seed, $artists) = @_;
+    my ($client, $cb, $label, $artists, $notInLibrary) = @_;
 
     my @queue = @$artists;
     my @byArtist;
+    my @noHitsOwned;
 
     my $next;
     $next = sub {
@@ -167,13 +320,21 @@ sub _fetchHitsSerially {
 
         if ( !$artist ) {
             undef $next;               # break the closure cycle
-            return _buildFeed($client, $cb, $seed, \@byArtist);
+            return _buildFeed($client, $cb, $label, \@byArtist,
+                               { missing => $notInLibrary, noHits => \@noHitsOwned });
         }
 
         my $collect = sub {
             my $hits = shift || [];
             my $tracks = _matchArtist($artist, $hits);
-            push @byArtist, { name => $artist->{name}, tracks => $tracks } if @$tracks;
+            if (@$tracks) {
+                push @byArtist, { name => $artist->{name}, tracks => $tracks };
+            }
+            else {
+                # In the library, but none of its hits are. Worth saying out
+                # loud rather than letting the artist silently vanish.
+                push @noHitsOwned, $artist->{name};
+            }
             $next->();
         };
 
@@ -227,7 +388,7 @@ sub _matchArtist {
 }
 
 sub _buildFeed {
-    my ($client, $cb, $seed, $byArtist) = @_;
+    my ($client, $cb, $label, $byArtist, $skipped) = @_;
 
     if ( !@$byArtist ) {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] });
@@ -281,7 +442,7 @@ sub _buildFeed {
     # Slim::Networking::IO::Select task, which is a far worse failure than a
     # missing menu entry.
     if ($client) {
-        $client->pluginData( hits => { artist => $seed, urls => \@urls } );
+        $client->pluginData( hits => { artist => $label, urls => \@urls } );
 
         # Counts go HERE, not in the feed title. XMLBrowser overwrites a feed's
         # title with the menu item's own name ($opml->{title} = $args->{feedTitle}),
@@ -298,14 +459,14 @@ sub _buildFeed {
                              . sprintf(' (%d tracks, %d artists)', scalar(@urls), scalar(@$byArtist)),
                 type        => 'link',
                 url         => \&playHits,
-                passthrough => [ { artist => $seed, cmd => 'playtracks', save => 0 } ],
+                passthrough => [ { artist => $label, cmd => 'playtracks', save => 0 } ],
                 nextWindow  => 'nowPlaying',
             },
             {
                 name        => cstring($client, 'PLUGIN_HITSPLAYLIST_ADD_QUEUE'),
                 type        => 'link',
                 url         => \&playHits,
-                passthrough => [ { artist => $seed, cmd => 'addtracks', save => 0 } ],
+                passthrough => [ { artist => $label, cmd => 'addtracks', save => 0 } ],
                 # Deliberately NOT nowPlaying: appending should leave you where
                 # you are so you can keep browsing and add more.
             },
@@ -313,9 +474,27 @@ sub _buildFeed {
                 name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
                 type        => 'link',
                 url         => \&playHits,
-                passthrough => [ { artist => $seed, cmd => 'playtracks', save => 1 } ],
+                passthrough => [ { artist => $label, cmd => 'playtracks', save => 1 } ],
                 nextWindow  => 'nowPlaying',
             };
+    }
+
+    # Say why the result is smaller than what was asked for.
+    #
+    # This is the whole reason strict mode is defensible. Without it, asking for
+    # four artists and getting three reads as a broken plugin. Last.fm's ranking
+    # is also scrobble-weighted, so thin catalogues return junk in the top slots
+    # that silently becomes a miss; the user cannot otherwise tell "I don't own
+    # it" from "the matcher failed".
+    $skipped ||= {};
+    my @absent = ( @{ $skipped->{missing} || [] }, @{ $skipped->{noHits} || [] } );
+
+    if (@absent) {
+        push @items, {
+            type => 'text',
+            name => cstring($client, 'PLUGIN_HITSPLAYLIST_NO_HITS_OWNED')
+                  . ': ' . join(', ', @absent),
+        };
     }
 
     $cb->({ items => \@items });
