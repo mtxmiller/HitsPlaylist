@@ -13,7 +13,7 @@
 # Usage:
 #   perl tools/probe.pl                          # all artists
 #   perl tools/probe.pl "Taylor Swift"           # one artist
-#   perl tools/probe.pl --host 192.168.1.8 --verbose
+#   perl tools/probe.pl --host my-lms-server --verbose
 
 use strict;
 use warnings;
@@ -30,7 +30,7 @@ use HitsPlaylist::LastFm qw(top_tracks);
 binmode(STDOUT, ':encoding(UTF-8)');
 binmode(STDERR, ':encoding(UTF-8)');
 
-my $HOST    = '192.168.1.8';
+my $HOST    = $ENV{LMS_HOST} || 'localhost';
 my $PORT    = 9000;
 my $FILE    = "$FindBin::Bin/hits-probe.txt";
 my $VERBOSE = 0;

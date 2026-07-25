@@ -6,3 +6,4 @@ probe-*.txt
 # local only, never committed
 .cache/
 *.key
+HitsPlaylist-*.zip

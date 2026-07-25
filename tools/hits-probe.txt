@@ -5,7 +5,7 @@
 # strings; the matcher never knows where they came from. When the real API is
 # wired up, this file gets replaced by its output and nothing else changes.
 #
-# Artists chosen from the test library at 192.168.1.8 (LMS 9.1.1, 1422 artists,
+# Artists chosen from a real test library (LMS 9.1.1, 1422 artists,
 # 920 albums, 10,340 tracks), biased toward the ones with enough albums to make
 # version selection actually hard.
 #

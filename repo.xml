@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<extensions>
+  <details>
+    <title lang="EN">Hits Playlist Repository</title>
+  </details>
+  <plugins>
+    <plugin name="HitsPlaylist" version="0.5.0" minTarget="8.0" maxTarget="*">
+      <title lang="EN">Hits Playlist</title>
+      <desc lang="EN">Build a saved playlist of an artist's actual hits from your own library. Uses Last.fm popularity data to pick the tracks, then matches them against the music you already own. Includes similar-artist expansion and a basket for combining several artists.</desc>
+      <url>https://github.com/mtxmiller/HitsPlaylist/releases/download/v0.5.0/HitsPlaylist-0.5.0.zip</url>
+      <sha>39d8f7b82e52f6e1935d1a607731d008aec8c9a1</sha>
+      <link>https://github.com/mtxmiller/HitsPlaylist</link>
+      <creator>Eric Miller (mtxmiller)</creator>
+      <email>ericlmiller@gmail.com</email>
+    </plugin>
+  </plugins>
+</extensions>

@@ -5,7 +5,7 @@
 # working plugin look broken.
 #
 # usage: tools/drill.sh <artist_id> [player_mac]
-HOST=${HOST:-192.168.1.8}; PORT=${PORT:-9000}
+HOST=${LMS_HOST:-localhost}; PORT=${LMS_PORT:-9000}
 ART=$1; PLAYER=${2:-}
 rpc() { curl -s -m 90 -X POST "http://$HOST:$PORT/jsonrpc.js" -d "$1"; }
 
