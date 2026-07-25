@@ -154,17 +154,27 @@ sub _gotTopTracks {
         return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_MATCHES') ] });
     }
 
-    # Stash for the play+save command rather than threading 40 urls through a
-    # menu action, which jive would have to serialise into the client request.
-    $client->pluginData( hits => { artist => $artist, urls => \@urls } );
+    # There may be no player: the web UI browses artists without one selected,
+    # and any JSON-RPC caller can omit the player id. Browsing the list still
+    # works in that case; only playing needs somewhere to play.
+    #
+    # This is not hypothetical. Without the guard, `artistinfo items` with an
+    # empty player id threw inside the async HTTP read callback and took out a
+    # Slim::Networking::IO::Select task, which is a far worse failure than a
+    # missing menu entry.
+    if ($client) {
+        # Stash for the play+save command rather than threading 40 urls through
+        # a menu action, which jive would have to serialise into the request.
+        $client->pluginData( hits => { artist => $artist, urls => \@urls } );
 
-    unshift @items, {
-        name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
-        type        => 'link',
-        url         => \&playAndSave,
-        passthrough => [ { artist => $artist } ],
-        nextWindow  => 'nowPlaying',
-    };
+        unshift @items, {
+            name        => cstring($client, 'PLUGIN_HITSPLAYLIST_PLAY_SAVE'),
+            type        => 'link',
+            url         => \&playAndSave,
+            passthrough => [ { artist => $artist } ],
+            nextWindow  => 'nowPlaying',
+        };
+    }
 
     $cb->({
         items => \@items,
@@ -177,6 +187,9 @@ sub _gotTopTracks {
 
 sub playAndSave {
     my ( $client, $cb, $args, $pt ) = @_;
+
+    return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_PLAYER') ] })
+        unless $client;
 
     my $data = $client->pluginData('hits') || {};
     my $urls = $data->{urls} || [];

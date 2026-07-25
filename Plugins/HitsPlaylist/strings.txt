@@ -27,3 +27,6 @@ PLUGIN_HITSPLAYLIST_NOT_IN_LIBRARY
 
 PLUGIN_HITSPLAYLIST_NO_MATCHES
 	EN	None of this artist's hits are in your library
+
+PLUGIN_HITSPLAYLIST_NO_PLAYER
+	EN	Select a player first
