@@ -24,6 +24,7 @@ our @EXPORT_OK = qw(
     normalize_title normalize_artist bare_title
     is_live_title is_live_album similarity
     match_title choose_version dedupe_hits
+    artist_matches
 );
 
 # ---------------------------------------------------------------------------
@@ -224,6 +225,17 @@ sub normalize_artist {
 #   "Bruce Springsteen" vs "Bruce Springsteen & the E Street Band"
 # And combined credits stored as one contributor row, which really exist in the
 # test library: "Pickett, Stephen Cropper, Eddie Floyd"
+#
+# The prefix must land on a WORD BOUNDARY. Bare string-prefix matching means
+# "Muse" claims "Musetta", "Air" claims "Airbourne", "Low" claims "Lowly" and
+# "FLO" claims "Florry" — a suggested artist silently resolving to a different
+# artist you happen to own. All four were found in a real 1,400-artist library.
+#
+# Requiring more than a boundary — that the tail begin with "and", "the", "&"
+# and friends — was tried and measured against that same library. It removed
+# two more false positives but broke "Mitski" -> "Mitski Miyawaki" and
+# "Björk" -> a credit row starting with her name, so it was dropped. A trailing
+# word that is not a band tail is still accepted; see the known gap in t/.
 sub artist_matches {
     my ($wanted, $local) = @_;
     my $w = normalize_artist($wanted);
@@ -231,8 +243,35 @@ sub artist_matches {
     return 0 unless length $w && length $l;
 
     return 1 if $w eq $l;
-    return 1 if index($l, $w) == 0 || index($w, $l) == 0;   # prefix drift
-    return 1 if $l =~ /(?:\A|[\s,])\Q$w\E(?:[\s,]|\z)/;     # combined credit
+
+    # Name drift, in either direction, on a word boundary.
+    for my $pair ( [ $w, $l ], [ $l, $w ] ) {
+        my ($short, $long) = @$pair;
+        return 1 if index( $long, "$short " ) == 0;
+    }
+
+    # Combined credit. Checked against the RAW local name because the separator
+    # is the evidence: _bare turns commas into spaces, so by the time a name is
+    # normalized "Eddie Floyd, Steve Cropper" and "Air Supply" look alike.
+    return 1 if _credit_list_has($local, $w);
+
+    return 0;
+}
+
+# A comma-separated contributor row is ambiguous by nature: "Pickett, Stephen
+# Cropper, Eddie Floyd" is three people, "Crosby, Stills & Nash" is one band,
+# and no amount of text analysis separates them. So the entry we match must be
+# a full name, two words or more. That is what keeps a bare surname from
+# claiming a supergroup, and it costs only single-word names inside credit
+# lists, which the exact-match path above already handles when they have a
+# contributor row of their own.
+sub _credit_list_has {
+    my ($local_raw, $w) = @_;
+    return 0 unless defined $local_raw && $local_raw =~ /,/;
+    return 0 unless $w =~ /\s/;
+    for my $part ( split /\s*,\s*/, $local_raw ) {
+        return 1 if normalize_artist($part) eq $w;
+    }
     return 0;
 }
 

@@ -24,7 +24,7 @@ use Slim::Utils::Log;
 use Slim::Utils::Text;
 use Slim::Utils::Unicode;
 
-use Plugins::HitsPlaylist::Matcher qw(normalize_title bare_title is_live_title is_live_album);
+use Plugins::HitsPlaylist::Matcher qw(normalize_title bare_title is_live_title is_live_album artist_matches);
 
 use constant ROLES => '1,4,5,6';
 
@@ -32,8 +32,8 @@ my $log = logger('plugin.hitsplaylist');
 
 # Resolve an external artist name to a local contributor id.
 #
-# Tries exact normalized name, then prefix in either direction, which is what
-# handles the drift that bites immediately in real data:
+# Tries exact normalized name, then band-name drift, which bites immediately in
+# real data:
 #   "Tom Petty"        vs "Tom Petty and the Heartbreakers"
 #   "Prince"           vs "Prince and the Revolution"
 #   "Bruce Springsteen" vs "Bruce Springsteen & the E Street Band"
@@ -52,15 +52,29 @@ sub find_contributor {
     $sth->finish;
     return $row->{id} if $row;
 
-    # Prefix match, shortest first so "Tom Petty" prefers the plainest variant.
+    # Prefix candidates, shortest first so "Tom Petty" prefers the plainest
+    # variant. LIKE has no word boundary, so this pulls in "Airbourne" for
+    # "Air" and "Musetta" for "Muse" — artist_matches is what rejects those.
+    # Take several candidates rather than one: the shortest row is often the
+    # bad one ("Musetta" is shorter than "Muse & the Machine").
     $sth = $dbh->prepare_cached(q{
-        SELECT id, name, namesearch FROM contributors
-        WHERE namesearch LIKE ? ORDER BY length(namesearch) ASC LIMIT 1
+        SELECT id, name FROM contributors
+        WHERE namesearch LIKE ? ORDER BY length(namesearch) ASC LIMIT 20
     });
     $sth->execute($search . '%');
-    $row = $sth->fetchrow_hashref;
+    my @candidates;
+    while ( my $r = $sth->fetchrow_hashref ) {
+        push @candidates, $r;
+    }
     $sth->finish;
-    return $row->{id} if $row;
+
+    for my $c (@candidates) {
+        # Compare against the raw name, not namesearch: namesearch has already
+        # turned commas into spaces, and the comma is what tells a credit list
+        # from a band name.
+        my $local = Slim::Utils::Unicode::utf8decode( $c->{name} // '' );
+        return $c->{id} if artist_matches( $name, $local );
+    }
 
     return undef;
 }

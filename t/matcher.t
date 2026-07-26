@@ -17,6 +17,7 @@ use HitsPlaylist::Matcher qw(
     normalize_title normalize_artist bare_title
     is_live_title is_live_album similarity
     match_title choose_version dedupe_hits
+    artist_matches
 );
 
 binmode(Test::More->builder->$_, ':encoding(UTF-8)')
@@ -266,6 +267,54 @@ subtest 'live detection' => sub {
     # fixed. If it ever matters, the fix is a duration check, not more regex.
     ok !is_live_album('Frampton Comes Alive!'),  'unmarked live album, known gap';
     ok !is_live_album('One More From the Road'), 'unmarked live album, known gap';
+};
+
+subtest 'artist matching' => sub {
+    ok artist_matches('Mt. Joy', 'Mt Joy'),        'punctuation drift';
+    ok artist_matches('Sigur Ros', 'Sigur Rós'),   'diacritics';
+    ok artist_matches('The Killers', 'Killers'),   'leading article';
+
+    # Name drift. This is why the prefix rule exists at all.
+    ok artist_matches('Tom Petty', 'Tom Petty and the Heartbreakers'), 'and the';
+    ok artist_matches('Prince', 'Prince and the Revolution'),          'and the, short name';
+    ok artist_matches('Bruce Springsteen', 'Bruce Springsteen & the E Street Band'),
+        'ampersand the';
+    ok artist_matches('Florence', 'Florence + the Machine'), 'plus the';
+    ok artist_matches('Nick Cave', 'Nick Cave & The Bad Seeds'), 'ampersand The, cased';
+    ok artist_matches('Tom Petty and the Heartbreakers', 'Tom Petty'),
+        'drift is bidirectional';
+    ok artist_matches('Mitski', 'Mitski Miyawaki'), 'stage name to full name';
+
+    # Why the prefix must land on a word boundary. Each of these is a real
+    # artist claiming a DIFFERENT real artist, all four found by running this
+    # against a 1,400-artist library.
+    ok !artist_matches('Muse', 'Musetta'),  'prefix inside a word';
+    ok !artist_matches('Air', 'Airbourne'), 'prefix inside a word';
+    ok !artist_matches('Low', 'Lowly'),     'prefix inside a word';
+    ok !artist_matches('FLO', 'Florry'),    'prefix inside a word, real case';
+
+    # KNOWN GAP, asserted so it cannot regress silently.
+    # A boundary is not proof: "Air Supply" is not Air. Closing it needs the
+    # tail to be a band word ("and", "the", "&"), which was tried and measured
+    # and cost more true matches than it saved. Accepted rather than fixed.
+    # The consequence is a suggested artist resolving to a neighbour you own,
+    # never a wrong file, and it cannot happen for an artist you picked
+    # yourself — those resolve by id.
+    ok artist_matches('Air',    'Air Supply'),  'boundary false positive, known gap';
+    ok artist_matches('Bush',   'Bush Tetras'), 'boundary false positive, known gap';
+    ok artist_matches('Crosby', 'Crosby, Stills & Nash'),
+        'boundary false positive, known gap';
+
+    # Combined credits, which really exist in the test library.
+    ok artist_matches('Eddie Floyd', 'Pickett, Stephen Cropper, Eddie Floyd'),
+        'credit list, last entry';
+    ok artist_matches('Stephen Cropper', 'Pickett, Stephen Cropper, Eddie Floyd'),
+        'credit list, middle entry';
+    ok !artist_matches('Eddie', 'Pickett, Stephen Cropper, Eddie Floyd'),
+        'credit list entries match whole, not partially';
+
+    ok !artist_matches('', 'Mt. Joy'),  'empty wanted';
+    ok !artist_matches('Mt. Joy', ''),  'empty local';
 };
 
 done_testing();
