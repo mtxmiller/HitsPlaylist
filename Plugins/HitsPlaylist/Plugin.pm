@@ -167,13 +167,14 @@ sub postinitPlugin {
 }
 
 # Material Skin 6.4.6 and later lets a plugin add entries to its artist menu.
-# These two sit beside Add to favorites. More > Hits is unchanged and still
-# opens the track list. Play hits starts playback and needs a selected player.
-# Add to Hits Basket does not.
+# These three sit beside Add to favorites. More > Hits is unchanged and still
+# opens the track list. Both Play hits entries start playback and need a
+# selected player. Add to Hits Basket does not.
 #
-# Absent when Material is not installed. Do not load that plugin from here.
+# Skipped when Material is not installed, or is too old to have
+# registerCustomAction. Never load Material from here.
 sub _registerMaterialActions {
-    return unless exists $INC{'Plugins/MaterialSkin/Plugin.pm'};
+    return unless Plugins::MaterialSkin::Plugin->can('registerCustomAction');
 
     Plugins::MaterialSkin::Plugin::registerCustomAction('artist', {
         title      => string('PLUGIN_HITSPLAYLIST_BASKET_ADD'),
@@ -184,6 +185,11 @@ sub _registerMaterialActions {
         title      => string('PLUGIN_HITSPLAYLIST_PLAY_HITS'),
         icon       => 'play_circle_outline',
         lmscommand => [ 'hitsplaylist', 'playhits', 'artist_id:$ARTISTID', 'artist:$ARTISTNAME' ],
+    });
+    Plugins::MaterialSkin::Plugin::registerCustomAction('artist', {
+        title      => string('PLUGIN_HITSPLAYLIST_PLAY_HITS_SIMILAR'),
+        icon       => 'radio',
+        lmscommand => [ 'hitsplaylist', 'playhits', 'artist_id:$ARTISTID', 'artist:$ARTISTNAME', 'similar:1' ],
     });
 }
 
@@ -332,21 +338,28 @@ sub expandFeed {
     return $cb->({ items => [ _errorItem($client, 'PLUGIN_HITSPLAYLIST_NO_ARTIST') ] })
         unless $seed;
 
-    # Resolve against the library BEFORE fetching anybody's hits. find_contributor
-    # is a local indexed lookup, artist.gettoptracks is a network round trip. On a
-    # typical library only a handful of 30 similar artists are owned, so this
-    # turns ~30 API calls into ~12.
+    _withSimilar($seed, sub {
+        # Only the seed is explicit; the similar artists are suggestions.
+        _buildFromNames($client, $cb, $seed, shift, MAX_ARTISTS(), undef, 1);
+    });
+}
+
+# The seed followed by Last.fm's similar artists, or just the seed if that
+# lookup fails. Resolving against the library happens later, in _buildFromNames:
+# on a typical library only a handful of 30 similar artists are owned, so that
+# turns ~30 API calls into ~12.
+sub _withSimilar {
+    my ($seed, $cb) = @_;
+
     Plugins::HitsPlaylist::LFM->similarArtists(
         sub {
             my $similar = shift || [];
-            # Only the seed is explicit; the similar artists are suggestions.
-            _buildFromNames($client, $cb, $seed,
-                [ $seed, map { $_->{name} } @$similar ], MAX_ARTISTS(), undef, 1);
+            $cb->([ $seed, map { $_->{name} } @$similar ]);
         },
         sub {
             my $err = shift;
             $log->error("getSimilar failed for '$seed': " . ($err // 'unknown'));
-            _buildFromNames($client, $cb, $seed, [ $seed ], MAX_ARTISTS(), undef, 1);
+            $cb->([ $seed ]);
         },
         $seed,
         SIMILAR_LIMIT,
@@ -741,6 +754,9 @@ sub _countSuffix {
 # Resolve whatever the caller gave us into an artist name.
 # Material substitutes $ARTISTID in some menus and $ARTISTNAME in others, so
 # accept either rather than making the user care which menu they are in.
+#
+# A placeholder Material could not fill arrives verbatim. "$ARTISTNAME" would
+# otherwise be added to the basket as an artist, so treat it as missing.
 sub _artistFromRequest {
     my ($request) = @_;
 
@@ -750,7 +766,7 @@ sub _artistFromRequest {
         }
     }
     my $name = $request->getParam('artist');
-    return ($name && length $name) ? $name : undef;
+    return ($name && length $name && $name !~ /^\$/) ? $name : undef;
 }
 
 sub _cliBasket {
@@ -804,13 +820,20 @@ sub _cliPlayHits {
         return;
     }
 
-    my $save = $request->getParam('save') ? 1 : 0;
-    my $cmd  = $request->getParam('add')  ? 'addtracks' : 'playtracks';
+    my $save    = $request->getParam('save')    ? 1 : 0;
+    my $similar = $request->getParam('similar') ? 1 : 0;
+    my $cmd     = $request->getParam('add')     ? 'addtracks' : 'playtracks';
+
+    # A build that fails (artist not owned, no hits matched) returns early
+    # without touching pluginData, so the previous artist's tracks would be
+    # played instead. Clear it first, with {} rather than undef: pluginData
+    # ignores an undefined value.
+    $client->pluginData( hits => {} );
 
     # Async: tell the CLI layer to hold the request open until Last.fm answers.
     $request->setStatusProcessing();
 
-    _buildFromNames($client, sub {
+    my $done = sub {
         my $feed = shift;
 
         my $data = $client->pluginData('hits') || {};
@@ -828,7 +851,16 @@ sub _cliPlayHits {
         $request->addResult('artist', $name);
         $request->addResult('count', scalar @$urls);
         $request->setStatusDone();
-    }, $name, [ $name ], 1, undef, 1);
+    };
+
+    if ($similar) {
+        _withSimilar($name, sub {
+            _buildFromNames($client, $done, $name, shift, MAX_ARTISTS(), undef, 1);
+        });
+    }
+    else {
+        _buildFromNames($client, $done, $name, [ $name ], 1, undef, 1);
+    }
 }
 
 sub _playlistName {
