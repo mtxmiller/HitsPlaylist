@@ -29,7 +29,7 @@ use base qw(Slim::Plugin::OPMLBased);
 use Slim::Menu::ArtistInfo;
 use Slim::Utils::Log;
 use Slim::Utils::Prefs;
-use Slim::Utils::Strings qw(cstring);
+use Slim::Utils::Strings qw(cstring string);
 
 use Plugins::HitsPlaylist::LFM;
 use Plugins::HitsPlaylist::Library;
@@ -155,12 +155,36 @@ sub _basketHas {
 }
 
 # Menu registration goes in postinitPlugin, not initPlugin: info providers are
-# collected after every plugin has loaded.
+# collected after every plugin has loaded. Material's module is loaded by then
+# too, when that skin is installed.
 sub postinitPlugin {
     Slim::Menu::ArtistInfo->registerInfoProvider( hitsPlaylistRadio => (
         after => 'top',
         func  => \&artistInfoMenu,
     ) );
+
+    _registerMaterialActions();
+}
+
+# Material Skin 6.4.6 and later lets a plugin add entries to its artist menu.
+# These two sit beside Add to favorites. More > Hits is unchanged and still
+# opens the track list. Play hits starts playback and needs a selected player.
+# Add to Hits Basket does not.
+#
+# Absent when Material is not installed. Do not load that plugin from here.
+sub _registerMaterialActions {
+    return unless exists $INC{'Plugins/MaterialSkin/Plugin.pm'};
+
+    Plugins::MaterialSkin::Plugin::registerCustomAction('artist', {
+        title      => string('PLUGIN_HITSPLAYLIST_BASKET_ADD'),
+        icon       => 'playlist_add',
+        lmscommand => [ 'hitsplaylist', 'basketadd', 'artist_id:$ARTISTID', 'artist:$ARTISTNAME' ],
+    });
+    Plugins::MaterialSkin::Plugin::registerCustomAction('artist', {
+        title      => string('PLUGIN_HITSPLAYLIST_PLAY_HITS'),
+        icon       => 'play_circle_outline',
+        lmscommand => [ 'hitsplaylist', 'playhits', 'artist_id:$ARTISTID', 'artist:$ARTISTNAME' ],
+    });
 }
 
 sub getDisplayName { 'PLUGIN_HITSPLAYLIST_NAME' }
