@@ -87,6 +87,21 @@ My Music > Hits Playlist
 The basket survives a server restart, and it is shared across players rather
 than being tied to whichever one you had selected.
 
+### Material Skin
+
+When Material Skin 6.4.6 or later is installed, the plugin adds two entries to
+the artist menu, next to **Add to favorites**:
+
+- **Add to Hits Basket** adds the artist. No player is required.
+- **Play hits** builds this artist's hits and plays them. A player must be selected.
+
+Material shows the entries in three places: the menu on an artist in
+**My Music > Artists**, the menu on an artist in search results, and the
+actions menu on the artist page.
+
+**More > Hits** is still there. That entry opens the track list. **Play hits**
+does not.
+
 ## Scripting
 
 Three commands are available from the LMS CLI or JSON-RPC, for scripts, keypads
