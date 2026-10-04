@@ -89,11 +89,13 @@ than being tied to whichever one you had selected.
 
 ### Material Skin
 
-When Material Skin 6.4.6 or later is installed, the plugin adds two entries to
+When Material Skin 6.4.6 or later is installed, the plugin adds three entries to
 the artist menu, next to **Add to favorites**:
 
 - **Add to Hits Basket** adds the artist. No player is required.
 - **Play hits** builds this artist's hits and plays them. A player must be selected.
+- **Play hits + similar** does the same, mixed with similar artists you own, like
+  **Expand with similar artists**. A player must be selected.
 
 Material shows the entries in three places: the menu on an artist in
 **My Music > Artists**, the menu on an artist in search results, and the
@@ -114,6 +116,7 @@ hitsplaylist basketremove artist_id:N | artist:NAME
 <playerid> hitsplaylist playhits artist_id:N
 <playerid> hitsplaylist playhits artist_id:N add:1     append instead of replace
 <playerid> hitsplaylist playhits artist_id:N save:1    also save a playlist
+<playerid> hitsplaylist playhits artist_id:N similar:1 mix in similar artists
 ```
 
 ## Settings
