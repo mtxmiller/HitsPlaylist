@@ -144,7 +144,6 @@ you need to know whether the assumption or the code changed.
 | `albums.compilation` is a real boolean column | same schema |
 | `registerInfoProvider` belongs in `postinitPlugin`, not `initPlugin` | LastMix `Plugin.pm:38` |
 | enqueue via `playlist playtracks listRef` with plain urls | LastMix `CLI.pm:91` |
-| API key convention: `install.xml` `<id2>`, dashes stripped at runtime | LastMix `LFM.pm:22`, `LFM.pm:430` |
 | `_pluginDataFor` comes from the base class | slimserver `Slim/Plugin/Base.pm:111` |
 | `type => 'link'` may use `url => \&coderef` with `passthrough` | slimserver `Slim/Control/XMLBrowser.pm:471,494` |
 | handler signature is `($client, $cb, $args, @passthrough)` | slimserver `Slim/Control/XMLBrowser.pm:525` |
@@ -161,11 +160,9 @@ you need to know whether the assumption or the code changed.
 4. `shasum` the zip, put it in `<sha>` in `repo.xml`
 5. Create the GitHub release, attach the zip, push `repo.xml` to `main`
 
-The Last.fm API key ships in `install.xml` as `<id2>`, UUID-formatted with the
-dashes stripped at runtime. This is the LastMix convention and it means users
-register nothing. It is obfuscation, not secrecy: it is public, and Last.fm can
-revoke it. The 30-day response cache keeps aggregate traffic low, and users can
-supply their own key in settings.
+The plugin ships with a built-in Last.fm API key, so users register nothing.
+Last.fm can revoke it. The 30-day response cache keeps aggregate traffic low, and
+users can supply their own key in settings.
 
 ## Open questions
 

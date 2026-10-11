@@ -31,9 +31,8 @@ my $cache = Slim::Utils::Cache->new();
 
 my $aid;
 
-# The key lives in install.xml as <id2>, UUID-formatted so it reads as an
-# identifier rather than a credential. A user-supplied key in prefs wins, for
-# anyone who would rather not share the pooled rate limit.
+# A user-supplied key in prefs wins, for anyone who would rather not share the
+# pooled rate limit.
 sub aid {
     my ($class, $new) = @_;
 
