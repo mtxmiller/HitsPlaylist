@@ -26,8 +26,8 @@ sub handler {
 
     if ( $paramRef->{saveSettings} ) {
         # An API key pasted from Last.fm is 32 hex characters. People paste it
-        # with whitespace, or paste the shared secret by mistake, or paste the
-        # UUID-with-dashes form. Normalise what we can and reject the rest
+        # with whitespace, or paste the shared secret by mistake. Normalise what
+        # we can and reject the rest
         # rather than silently making every lookup fail with a 403.
         my $key = $paramRef->{pref_apikey} // '';
         $key =~ s/[^0-9a-fA-F]//g;

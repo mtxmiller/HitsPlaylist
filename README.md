@@ -179,8 +179,7 @@ rules and a number of non-obvious traps in the LMS plugin API.
 
 Built by reading [LastMix](https://github.com/michaelherger/LastMix) and
 [MusicArtistInfo](https://github.com/michaelherger/MusicArtistInfo) by Michael
-Herger, which is where the API key convention and the asynchronous patterns come
-from. The basket exists because DynamicPlaylists4 solved the same problem first.
+Herger, which is where the asynchronous patterns come from. The basket exists because DynamicPlaylists4 solved the same problem first.
 
 ## License
 

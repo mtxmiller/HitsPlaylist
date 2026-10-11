@@ -86,7 +86,6 @@ $prefs->setValidate({ validator => 'intlimit', low => 1,  high => 30  }, 'simila
 sub initPlugin {
     my $class = shift;
 
-    # The Last.fm key ships in install.xml as <id2>, UUID-formatted.
     Plugins::HitsPlaylist::LFM->aid( $class->_pluginDataFor('id2') );
 
     Slim::Control::Request::addDispatch(
